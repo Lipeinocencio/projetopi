@@ -1,0 +1,5 @@
+.venv/
+excursoes.db
+sistema.db
+static/uploads/
+__pycache__/

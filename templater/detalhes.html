@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ v[1] }} - Anderson Excursões</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root { --cor-marca: #1B264A; }
+        body { background-color: #f8f9fa; }
+        .bg-marca { background-color: var(--cor-marca) !important; }
+        .text-marca { color: var(--cor-marca) !important; }
+        .btn-marca { background-color: var(--cor-marca); color: white; border: none; transition: 0.3s; font-weight: bold; }
+        .btn-marca:hover { background-color: #0d2b85; color: white; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        .img-detalhe { max-height: 450px; object-fit: cover; width: 100%; border-radius: 15px; }
+        .card-checkout { border: none; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); position: sticky; top: 20px; }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-expand-lg navbar-dark bg-marca shadow-sm mb-5">
+        <div class="container d-flex justify-content-between align-items-center">
+            <a class="navbar-brand fw-bold" href="/site">← Voltar para o Site</a>
+
+            {% if session.usuario_id %}
+            <a href="/carrinho" class="btn btn-outline-light fw-bold d-flex align-items-center gap-2">
+                <i class="bi bi-cart3 fs-5"></i> Ver Carrinho
+            </a>
+            {% endif %}
+        </div>
+    </nav>
+
+    <div class="container mb-5">
+        <div class="row g-5">
+            <div class="col-md-7">
+                {% if v[5] %}
+                    <img src="/static/uploads/{{ v[5] }}" class="img-detalhe shadow-sm mb-4" alt="{{ v[1] }}">
+                {% else %}
+                    <div class="bg-secondary text-white d-flex align-items-center justify-content-center img-detalhe mb-4">Sem Imagem</div>
+                {% endif %}
+
+                <h1 class="fw-bold text-marca mb-3">{{ v[1] }}</h1>
+                <hr>
+
+                <h4 class="fw-bold text-marca mt-4">📋 Informações Importantes</h4>
+                <p class="text-muted fs-5" style="white-space: pre-line;">
+                    {{ v[6] if v[6] else 'Nenhuma informação adicional cadastrada para esta excursão.' }}
+                </p>
+
+                <div class="bg-white p-4 rounded-3 border mt-4">
+                    <h5 class="fw-bold text-marca mb-3">🚫 Classificação e Regras</h5>
+                    <div style="white-space: pre-line;" class="text-muted fs-6">
+                        {{ v[7] if v[7] else 'Nenhuma regra específica cadastrada para esta excursão.' }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-5">
+                <div class="card card-checkout p-4 border bg-white">
+                    <span class="badge bg-success mb-3 p-2 align-self-start fs-6">Inscrições Abertas</span>
+                    <h5 class="text-muted mb-1">📅 Data do Evento:</h5>
+                    <p class="fw-bold fs-5 text-dark mb-4">{{ v[2] }}</p>
+
+                    <h5 class="text-muted mb-1">🎫 Vagas Totais Disponíveis:</h5>
+                    <p class="fw-bold fs-5 text-dark mb-4">{{ v[3] }} Assentos</p>
+
+                    <hr>
+
+                    <h5 class="text-muted mt-2">Valor por Assento:</h5>
+                    <h2 class="text-marca fw-bold mb-4">R$ {{ "%.2f"|format(v[4]) }}</h2>
+
+                    <form action="/adicionar_carrinho/{{ v[0] }}" method="POST">
+                        <div class="mb-4">
+                            <label for="quantidade" class="form-label fw-bold text-muted small">Selecione a quantidade de assentos:</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-white"><i class="bi bi-people-fill text-marca"></i></span>
+                                <input type="number" class="form-control text-center fw-bold fs-5" id="quantidade" name="quantidade" value="1" min="1" max="{{ v[3] }}" required>
+                            </div>
+                            <small class="text-muted d-block mt-1">*Máximo de {{ v[3] }} assentos disponíveis para esta viagem.</small>
+                        </div>
+
+                        <button type="submit" class="btn btn-marca btn-lg w-100 py-3 rounded-pill shadow-sm d-flex align-items-center justify-content-center gap-2">
+                            <i class="bi bi-cart-plus fs-4"></i> Adicionar ao Carrinho
+                        </button>
+                    </form>
+
+                    <p class="text-center text-muted small mt-3 mb-0">🔒 Pagamento unificado e processado via Mercado Pago</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-marca text-white py-4 text-center mt-auto">
+        <div class="container">
+            <p class="mb-0 fw-bold">&copy; 2026 Anderson Excursões. Todos os direitos reservados.</p>
+        </div>
+    </footer>
+
+</body>
+</html>

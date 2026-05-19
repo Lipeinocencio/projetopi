@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meu Carrinho - {{ conf[1] if conf else 'PI Excursões' }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root { --cor-marca: #1B264A; }
+        .bg-marca { background-color: var(--cor-marca) !important; }
+        .text-marca { color: var(--cor-marca) !important; }
+        .btn-marca { background-color: var(--cor-marca); color: white; border: none; }
+        .btn-marca:hover { background-color: #0d2b85; color: white; }
+    </style>
+</head>
+<body class="bg-light">
+
+    <nav class="navbar navbar-expand-lg navbar-dark bg-marca shadow-sm mb-5">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="/site">🛒 Carrinho de Compras</a>
+            <a href="/site" class="btn btn-outline-light btn-sm fw-bold">Continuar Comprando</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="row g-4">
+            <div class="col-lg-8">
+                <div class="card shadow-sm border-0 p-4">
+                    <h4 class="fw-bold text-marca mb-4">Assentos Selecionados</h4>
+
+                    {% if itens %}
+                        {% for item in itens %}
+                        <div class="row align-items-center mb-3 pb-3 border-bottom g-3">
+                            <div class="col-3 col-md-2">
+                                {% if item.imagem %}
+                                    <img src="/static/uploads/{{ item.imagem }}" class="img-fluid rounded" alt="Destino" style="height: 60px; object-fit: cover; width: 100%;">
+                                {% else %}
+                                    <div class="bg-secondary text-white text-center rounded d-flex align-items-center justify-content-center" style="height: 60px; font-size: 10px;">Sem foto</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-9 col-md-4">
+                                <h6 class="fw-bold mb-0">{{ item.destino }}</h6>
+                                <small class="text-muted">📅 {{ item.data }}</small>
+                            </div>
+                            <div class="col-6 col-md-3 text-md-center">
+                                <span class="badge bg-light text-dark border p-2">Quantidade: {{ item.quantidade }}</span>
+                            </div>
+                            <div class="col-4 col-md-2 text-end">
+                                <span class="fw-bold text-marca">R$ {{ "%.2f"|format(item.subtotal) }}</span>
+                            </div>
+                            <div class="col-2 col-md-1 text-end">
+                                <a href="/remover_carrinho/{{ item.id }}" class="text-danger" title="Remover do carrinho">
+                                    <i class="bi bi-trash3 fs-5"></i>
+                                </a>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="text-center py-5">
+                            <i class="bi bi-cart text-muted display-3"></i>
+                            <p class="text-muted fs-5 mt-3">Seu carrinho está vazio.</p>
+                            <a href="/site" class="btn btn-marca mt-2 fw-bold">Ver Próximas Excursões</a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if itens %}
+            <div class="col-lg-4">
+                <div class="card shadow-sm border-0 p-4">
+                    <h5 class="fw-bold text-marca mb-3">Resumo do Pedido</h5>
+                    <div class="d-flex justify-content-between mb-3 fs-5">
+                        <span>Total:</span>
+                        <span class="fw-bold text-marca">R$ {{ "%.2f"|format(total) }}</span>
+                    </div>
+
+                    <form action="/finalizar_carrinho_mp" methods="POST">
+                        <button type="submit" class="btn btn-success w-100 fw-bold py-3 shadow-sm">
+                            <i class="bi bi-credit-card-2-back me-2"></i> Ir Para o Pagamento
+                        </button>
+                    </form>
+                    <small class="text-muted text-center d-block mt-3">
+                        <i class="bi bi-lock-fill"></i> Ambiente seguro via Mercado Pago
+                    </small>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</body>
+</html>
