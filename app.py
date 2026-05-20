@@ -510,7 +510,9 @@ def login():
 @app.route('/adicionar_carrinho/<int:id_viagem>', methods=['POST'])
 def adicionar_carrinho(id_viagem):
     if 'usuario_id' not in session:
-        return jsonify({'erro': 'Faça login para adicionar ao carrinho'}), 401
+        # Troquei o jsonify por um redirecionamento com mensagem
+        flash("Faça login para adicionar itens ao carrinho.")
+        return redirect('/login')
 
     quantidade = int(request.form.get('quantidade', 1))
 
