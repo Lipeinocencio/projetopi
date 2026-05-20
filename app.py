@@ -703,9 +703,42 @@ def logout():
 
 @app.route('/confirmacao_compra')
 def confirmacao_compra():
-    # Limpa o carrinho após a "compra"
+    if 'usuario_id' not in session:
+        flash("Faça login para finalizar a sua reserva.")
+        return redirect('/login')
+
+    carrinho = session.get('carrinho', {})
+    if not carrinho:
+        return redirect('/site')
+
+    id_usuario = session['usuario_id']
+
+    # Conecta ao banco de dados para salvar as reservas
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    try:
+        # Percorre os itens do carrinho e grava cada assento comprado no banco
+        for id_viagem_str, qtd in carrinho.items():
+            id_viagem = int(id_viagem_str)
+            
+            # Executa o insert de acordo com a quantidade selecionada
+            for _ in range(qtd):
+                cursor.execute(
+                    "INSERT INTO reservas (id_usuario, id_viagem) VALUES (?, ?)",
+                    (id_usuario, id_viagem)
+                )
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        return f"<h1>Erro ao processar os dados da compra:</h1><p>{str(e)}</p>"
+    finally:
+        conn.close()
+
+    # Limpa o carrinho da sessão somente após gravar tudo no banco com sucesso
     session.pop('carrinho', None)
-    
+
     config, _, _ = obter_dados_cms()
     return render_template('confirmacao.html', conf=config)
 
