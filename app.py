@@ -701,6 +701,14 @@ def logout():
     session.clear()
     return redirect('/login')
 
+@app.route('/confirmacao_compra')
+def confirmacao_compra():
+    # Limpa o carrinho após a "compra"
+    session.pop('carrinho', None)
+    
+    config, _, _ = obter_dados_cms()
+    return render_template('confirmacao.html', conf=config)
+
 
 if __name__ == '__main__':
     app.run(debug=True)
