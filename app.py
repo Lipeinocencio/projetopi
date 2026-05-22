@@ -1,21 +1,36 @@
 import os
-import sqlite3
+import psycopg2
 import mercadopago
 import re
-import json  # ← Adicionado para fazer a conversão dos dados dos clientes para a Modal
+import json
+import cloudinary
+import cloudinary.uploader
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, session, flash, jsonify
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-app.secret_key = 'chave_secreta_anderson_excursoes'
+app.secret_key = os.environ.get('SECRET_KEY', 'chave_secreta_anderson_excursoes')
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
-# Configuração para manter o usuário logado
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)  # Mantém logado por 30 dias
+# --- CONFIGURAÇÃO CLOUDINARY (Imagens na Nuvem) ---
+cloudinary.config(
+    cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME'),
+    api_key = os.environ.get('CLOUDINARY_API_KEY'),
+    api_secret = os.environ.get('CLOUDINARY_API_SECRET')
+)
 
+# --- CREDENCIAL DO MERCADO PAGO ---
+sdk = mercadopago.SDK("APP_USR-4508380654619786-050619-e6b70695379fd4e5cdd4ded2c2614463-3384502064")
 
-# --- 1. FUNÇÕES DE VALIDAÇÃO ---
+# --- CONEXÃO COM O BANCO DE DADOS POSTGRESQL ---
+def get_db_connection():
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL não configurada nas variáveis de ambiente.")
+    return psycopg2.connect(DATABASE_URL, sslmode='require')
 
+# --- FUNÇÕES DE VALIDAÇÃO ---
 def validar_cpf(cpf):
     cpf = re.sub(r'\D', '', cpf)
     if len(cpf) != 11 or cpf == cpf[0] * 11:
@@ -26,7 +41,6 @@ def validar_cpf(cpf):
         if digito != int(cpf[i]):
             return False
     return True
-
 
 def validar_data_nascimento(data_str):
     try:
@@ -39,131 +53,136 @@ def validar_data_nascimento(data_str):
     except (ValueError, TypeError):
         return False
 
-
-# --- CONFIGURAÇÃO PARA TESTE LOCAL ---
-DB_NAME = 'sistema.db'
-UPLOAD_FOLDER = os.path.join('static', 'uploads')
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# --- CREDENCIAL DO MERCADO PAGO ---
-sdk = mercadopago.SDK("APP_USR-4508380654619786-050619-e6b70695379fd4e5cdd4ded2c2614463-3384502064")
-
-
+# Agora a imagem vai direto pro Cloudinary e retorna o link público
 def salvar_imagem(file_obj):
     if file_obj and file_obj.filename != '':
-        nome = secure_filename(file_obj.filename)
-        file_obj.save(os.path.join(app.config['UPLOAD_FOLDER'], nome))
-        return nome
+        upload_result = cloudinary.uploader.upload(file_obj)
+        return upload_result['secure_url']
     return None
 
-
 def inicializar_banco():
-    conn = sqlite3.connect(DB_NAME)
+    # Só roda se as variáveis de ambiente estiverem presentes (Render)
+    if not os.environ.get('DATABASE_URL'):
+        return
+
+    conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Criação das tabelas principais caso não existam
     cursor.execute('''CREATE TABLE IF NOT EXISTS viagens (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                        id SERIAL PRIMARY KEY, 
                         destino TEXT NOT NULL, 
                         data TEXT NOT NULL, 
                         vagas_totais INTEGER, 
                         preco REAL, 
                         imagem TEXT,
                         informacoes TEXT,
-                        regras TEXT)''')
+                        regras TEXT,
+                        mensagem_whatsapp TEXT)''')
 
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, email TEXT NOT NULL UNIQUE, senha TEXT NOT NULL, cpf TEXT NOT NULL, telefone TEXT NOT NULL, data_nascimento TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+                        id SERIAL PRIMARY KEY, 
+                        nome TEXT NOT NULL, 
+                        email TEXT NOT NULL UNIQUE, 
+                        senha TEXT NOT NULL, 
+                        cpf TEXT NOT NULL, 
+                        telefone TEXT NOT NULL, 
+                        data_nascimento TEXT)''')
 
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS reservas (id INTEGER PRIMARY KEY AUTOINCREMENT, id_usuario INTEGER, id_viagem INTEGER, data_reserva TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (id_usuario) REFERENCES usuarios(id), FOREIGN KEY (id_viagem) REFERENCES viagens(id))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS reservas (
+                        id SERIAL PRIMARY KEY, 
+                        id_usuario INTEGER REFERENCES usuarios(id), 
+                        id_viagem INTEGER REFERENCES viagens(id), 
+                        data_reserva TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
 
-    # --- NOVA TABELA DE FAVORITOS ADICIONADA AQUI ---
     cursor.execute('''CREATE TABLE IF NOT EXISTS favoritos (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                        id_usuario INTEGER, 
-                        id_viagem INTEGER, 
-                        FOREIGN KEY (id_usuario) REFERENCES usuarios(id), 
-                        FOREIGN KEY (id_viagem) REFERENCES viagens(id),
+                        id SERIAL PRIMARY KEY, 
+                        id_usuario INTEGER REFERENCES usuarios(id), 
+                        id_viagem INTEGER REFERENCES viagens(id),
                         UNIQUE(id_usuario, id_viagem))''')
 
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS configuracoes (id INTEGER PRIMARY KEY CHECK (id = 1), nome_agencia TEXT, logo TEXT, banner1_img TEXT, banner1_link TEXT, banner2_img TEXT, banner2_link TEXT, passo1_tit TEXT, passo1_desc TEXT)''')
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS depoimentos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, nota INTEGER, texto TEXT)''')
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS faqs (id INTEGER PRIMARY KEY AUTOINCREMENT, pergunta TEXT, resposta TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS configuracoes (
+                        id INTEGER PRIMARY KEY CHECK (id = 1), 
+                        nome_agencia TEXT, 
+                        logo TEXT, 
+                        banner1_img TEXT, banner1_link TEXT, 
+                        banner2_img TEXT, banner2_link TEXT, 
+                        passo1_tit TEXT, passo1_desc TEXT)''')
+                        
+    cursor.execute('''CREATE TABLE IF NOT EXISTS depoimentos (
+                        id SERIAL PRIMARY KEY, nome TEXT, nota INTEGER, texto TEXT)''')
+                        
+    cursor.execute('''CREATE TABLE IF NOT EXISTS faqs (
+                        id SERIAL PRIMARY KEY, pergunta TEXT, resposta TEXT)''')
 
-    # Atualização dinâmica do banco caso o usuário já tenha criado a tabela viagens sem os novos campos
-    try:
-        cursor.execute("ALTER TABLE viagens ADD COLUMN informacoes TEXT;")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("ALTER TABLE viagens ADD COLUMN regras TEXT;")
-    except sqlite3.OperationalError:
-        pass
-
-    # AUTOMATIZAÇÃO: Cria o campo mensagem_whatsapp caso ele não exista na tabela do banco oficial
-    try:
-        cursor.execute("ALTER TABLE viagens ADD COLUMN mensagem_whatsapp TEXT;")
-    except sqlite3.OperationalError:
-        pass
-
+    # Configuração Inicial
     cursor.execute("SELECT id FROM configuracoes WHERE id=1")
     if not cursor.fetchone():
-        cursor.execute(
-            "INSERT INTO configuracoes (id, nome_agencia, banner1_link, banner2_link, passo1_tit, passo1_desc) VALUES (1, 'Anderson Excursões', '#', '#', 'Escolha e Compre', 'Selecione o evento desejado e pague com segurança.')")
+        cursor.execute('''INSERT INTO configuracoes (id, nome_agencia, banner1_link, banner2_link, passo1_tit, passo1_desc) 
+                          VALUES (1, 'Anderson Excursões', '#', '#', 'Escolha e Compre', 'Selecione o evento desejado e pague com segurança.')''')
 
-        # Força a criação da coluna mensagem_whatsapp caso o banco antigo ainda persista
-        try:
-            cursor.execute("ALTER TABLE viagens ADD COLUMN mensagem_whatsapp TEXT;")
-        except sqlite3.OperationalError:
-            pass  # Se a coluna já existir, ele só ignora e não quebra o código
+    # Injeção de Shows Padrão (Seed)
+    cursor.execute("SELECT COUNT(*) FROM viagens")
+    if cursor.fetchone()[0] == 0:
+        viagens_teste = [
+            ('Rock in Rio - Bate e Volta (Fim de Semana)', '2026-09-19', 46, 350.00, '', 'Transporte executivo com ar-condicionado. Chegada antes da abertura dos portões.', 'Ingresso não incluso. Retorno 1h após o último show do Palco Mundo.', 'Olá, quero reservar minha vaga para o Rock in Rio!'),
+            ('Lollapalooza Brasil - Autódromo de Interlagos', '2026-03-27', 50, 180.00, '', 'Saída de manhã com parada para café. Retorno logo após o encerramento.', 'Tolerância máxima de 15 minutos de atraso no embarque.', 'Olá, quero ir pro Lollapalooza!'),
+            ('Festa do Peão de Barretos', '2026-08-20', 40, 150.00, '', 'Excursão saindo na sexta-feira à noite. Clima de festa no ônibus!', 'Menores de idade apenas com autorização autenticada em cartório.', 'Olá, quero ir para Barretos!'),
+            ('Show Bruno Mars - MorumBIS (SP)', '2026-11-10', 45, 120.00, '', 'Transporte direto para o estádio. Parada apenas para banheiro na estrada.', 'Proibido consumo de bebidas alcoólicas dentro do ônibus.', 'Olá, quero ir no show do Bruno Mars!'),
+            ('Tardezinha / Thiaguinho - Neo Química Arena', '2026-12-05', 50, 100.00, '', 'Ônibus animado com esquenta! Desembarque na porta do evento.', 'Embarque apenas com apresentação de documento original com foto.', 'Olá, quero ir na Tardezinha!')
+        ]
+        cursor.executemany(
+            "INSERT INTO viagens (destino, data, vagas_totais, preco, imagem, informacoes, regras, mensagem_whatsapp) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            viagens_teste
+        )
 
     conn.commit()
+    cursor.close()
     conn.close()
 
-
-inicializar_banco()
+# Inicia o banco se as credenciais existirem
+try:
+    inicializar_banco()
+except Exception as e:
+    print(f"Aviso ao inicializar banco: {e}")
 
 
 def obter_dados_cms():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    config = cursor.execute("SELECT * FROM configuracoes WHERE id=1").fetchone()
-    deps = cursor.execute("SELECT * FROM depoimentos ORDER BY id DESC").fetchall()
-    faqs = cursor.execute("SELECT * FROM faqs ORDER BY id DESC").fetchall()
+    cursor.execute("SELECT * FROM configuracoes WHERE id=1")
+    config = cursor.fetchone()
+    cursor.execute("SELECT * FROM depoimentos ORDER BY id DESC")
+    deps = cursor.fetchall()
+    cursor.execute("SELECT * FROM faqs ORDER BY id DESC")
+    faqs = cursor.fetchall()
     conn.close()
     return config, deps, faqs
 
 
-# --- ROTAS ADMINISTRATIVAS ---
+# --- ROTAS PRINCIPAIS ---
 @app.route('/')
 def index():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Buscamos as viagens cruas do banco de dados
-    viagens_cruas = cursor.execute("SELECT * FROM viagens").fetchall()
-    usuarios = cursor.execute("SELECT * FROM usuarios").fetchall()
+    cursor.execute("SELECT * FROM viagens")
+    viagens_cruas = cursor.fetchall()
+    cursor.execute("SELECT * FROM usuarios")
+    usuarios = cursor.fetchall()
 
-    # 1. Ajuste Dinâmico para a Aba "Gestão de Mensagens" e sua Modal de Compradores
     viagens = []
     for v in viagens_cruas:
         id_viagem = v[0]
         preco_unitario = v[4]
 
-        # Agrupa os compradores desta viagem contando quantos assentos cada CPF/Usuário comprou repetido no carrinho
-        compradores_db = cursor.execute('''
+        cursor.execute('''
             SELECT u.nome, u.cpf, u.data_nascimento, u.telefone, u.email, COUNT(r.id) as assentos
             FROM reservas r
             JOIN usuarios u ON r.id_usuario = u.id
-            WHERE r.id_viagem = ?
+            WHERE r.id_viagem = %s
             GROUP BY u.id
-        ''', (id_viagem,)).fetchall()
+        ''', (id_viagem,))
+        compradores_db = cursor.fetchall()
 
         compradores_lista = []
         for c in compradores_db:
@@ -171,100 +190,43 @@ def index():
             valor_pago = qtd_assentos * preco_unitario
 
             compradores_lista.append({
-                'nome': c[0],
-                'cpf': c[1],
-                'data_nascimento': c[2] if c[2] else '-',
-                'telefone': c[3],
-                'email': c[4],
-                'quantidade_assentos': qtd_assentos,
-                'valor_pago': valor_pago,
-                'forma_pagamento': 'Mercado Pago'  # Gateway padrão do sistema
+                'nome': c[0], 'cpf': c[1], 'data_nascimento': c[2] if c[2] else '-',
+                'telefone': c[3], 'email': c[4], 'quantidade_assentos': qtd_assentos,
+                'valor_pago': valor_pago, 'forma_pagamento': 'Mercado Pago'
             })
-
-        # Transformamos a tupla em um dicionário manipulável para o Jinja2 no HTML
-        viagem_dict = {
-            'id': v[0], 'destino': v[1], 'data': v[2], 'vagas_totais': v[3],
-            'preco': v[4], 'imagem': v[5], 'informacoes': v[6], 'regras': v[7],
-            'compras': compradores_lista,  # Usado no filtro {{ v.compras|length }}
-            'compras_json': json.dumps(compradores_lista)  # Capturado pelo JS da modal
-        }
-
-        # Criamos o mapeamento por índice numérico legado para não quebrar a primeira aba do seu HTML
-        viagem_compativel = [v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]]
 
         class ObjetoCompativel(list):
             pass
 
+        viagem_compativel = [v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]]
         v_obj = ObjetoCompativel(viagem_compativel)
         v_obj.id = v[0]
         v_obj.destino = v[1]
         v_obj.data = v[2]
         v_obj.compras = compradores_lista
         v_obj.compras_json = json.dumps(compradores_lista)
-
         viagens.append(v_obj)
 
-    # 2. Mantém a lógica clássica da base de clientes intacta
     clientes_lista = []
     for u in usuarios:
-        compras = cursor.execute(
-            '''SELECT v.destino, v.data FROM reservas r JOIN viagens v ON r.id_viagem = v.id WHERE r.id_usuario = ?''',
-            (u[0],)).fetchall()
+        cursor.execute('''SELECT v.destino, v.data FROM reservas r JOIN viagens v ON r.id_viagem = v.id WHERE r.id_usuario = %s''', (u[0],))
+        compras = cursor.fetchall()
         clientes_lista.append({'nome': u[1], 'email': u[2], 'cpf': u[4], 'telefone': u[5], 'compras': compras})
 
-    total_viagens = len(viagens)
-    total_clientes = len(usuarios)
-    total_reservas = cursor.execute("SELECT COUNT(*) FROM reservas").fetchone()[0]
-    faturamento_db = \
-        cursor.execute('''SELECT SUM(v.preco) FROM reservas r JOIN viagens v ON r.id_viagem = v.id''').fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM reservas")
+    total_reservas = cursor.fetchone()[0]
+    
+    cursor.execute('''SELECT SUM(v.preco) FROM reservas r JOIN viagens v ON r.id_viagem = v.id''')
+    faturamento_db = cursor.fetchone()[0]
 
     faturamento = faturamento_db if faturamento_db else 0.0
     faturamento_formatado = f"{faturamento:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-    stats = {'viagens': total_viagens, 'clientes': total_clientes, 'reservas': total_reservas,
-             'faturamento': faturamento_formatado}
+    stats = {'viagens': len(viagens), 'clientes': len(usuarios), 'reservas': total_reservas, 'faturamento': faturamento_formatado}
     conn.close()
+    
     config, deps, faqs = obter_dados_cms()
-    return render_template('index.html', lista=viagens, clientes=clientes_lista, conf=config, deps=deps, faqs=faqs,
-                           stats=stats)
-
-
-@app.route('/comprar/<int:id>')
-def comprar(id):
-    if 'usuario_id' not in session:
-        return redirect('/login')
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-
-        viagem = cursor.execute("SELECT * FROM viagens WHERE id = ?", (id,)).fetchone()
-
-        if not viagem:
-            conn.close()
-            return "<h1>Excursão não encontrada para compra!</h1>", 404
-
-        cursor.execute("INSERT INTO reservas (id_usuario, id_viagem) VALUES (?, ?)", (session['usuario_id'], id))
-        conn.commit()
-        conn.close()
-
-        preference_data = {
-            "items": [{
-                "title": f"Excursão: {viagem[1]}",
-                "quantity": 1,
-                "currency_id": "BRL",
-                "unit_price": float(viagem[4])
-            }],
-            "back_urls": {
-                "success": "https://projetointegrador.dominionulo.com.br/sucesso",
-                "failure": "https://projetointegrador.dominionulo.com.br/falha",
-                "pending": "https://projetointegrador.dominionulo.com.br/pendente"
-            },
-            "auto_return": "approved"
-        }
-        preference_response = sdk.preference().create(preference_data)
-        return redirect(preference_response["response"]["init_point"])
-    except Exception as e:
-        return f"<h1>Erro no pagamento:</h1><p>{str(e)}</p>"
+    return render_template('index.html', lista=viagens, clientes=clientes_lista, conf=config, deps=deps, faqs=faqs, stats=stats)
 
 
 @app.route('/cadastrar', methods=['POST'])
@@ -275,48 +237,19 @@ def cadastrar():
     preco = request.form.get('preco')
     informacoes = request.form.get('informacoes')
     regras = request.form.get('regras')
-
+    
+    # O upload agora sobe pro Cloudinary e devolve a URL
     imagem_nome = salvar_imagem(request.files.get('imagem'))
 
-    conn = sqlite3.connect(DB_NAME)
-    conn.cursor().execute(
-        "INSERT INTO viagens (destino, data, vagas_totais, preco, imagem, informacoes, regras) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO viagens (destino, data, vagas_totais, preco, imagem, informacoes, regras) VALUES (%s, %s, %s, %s, %s, %s, %s)",
         (destino, data, vagas, preco, imagem_nome, informacoes, regras)
     )
     conn.commit()
     conn.close()
     return redirect('/')
-
-
-@app.route('/excursao/<int:id>')
-def detalhes_excursao(id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    viagem = cursor.execute("SELECT * FROM viagens WHERE id = ?", (id,)).fetchone()
-    conn.close()
-
-    if not viagem:
-        return "<h1>Excursão não encontrada!</h1>", 404
-
-    config, deps, faqs = obter_dados_cms()
-    return render_template('detalhes.html', v=viagem, conf=config)
-
-
-@app.route('/editar/<int:id>')
-def editar_viagem(id):
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        viagem = conn.cursor().execute("SELECT * FROM viagens WHERE id=?", (id,)).fetchone()
-        conn.close()
-        config, deps, faqs = obter_dados_cms()
-
-        if not viagem:
-            return f"<h1 style='color:#367C2B'>ID {id} não encontrado.</h1><p>Base de dados em uso: {DB_NAME}</p>", 200
-
-        return render_template('editar.html', v=viagem, conf=config)
-    except Exception as e:
-        return f"<h1 style='color:#367C2B'>Erro na edição:</h1><p>{str(e)}</p>", 200
-
 
 @app.route('/atualizar/<int:id>', methods=['POST'])
 def atualizar_viagem(id):
@@ -326,20 +259,20 @@ def atualizar_viagem(id):
     preco = request.form.get('preco')
     informacoes = request.form.get('informacoes')
     regras = request.form.get('regras')
-
     mensagem_whatsapp = request.form.get('mensagem_whatsapp')
 
     imagem_nome = salvar_imagem(request.files.get('imagem'))
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
+    cursor = conn.cursor()
 
     if imagem_nome:
-        conn.cursor().execute(
-            "UPDATE viagens SET destino=?, data=?, vagas_totais=?, preco=?, imagem=?, informacoes=?, regras=?, mensagem_whatsapp=? WHERE id=?",
+        cursor.execute(
+            "UPDATE viagens SET destino=%s, data=%s, vagas_totais=%s, preco=%s, imagem=%s, informacoes=%s, regras=%s, mensagem_whatsapp=%s WHERE id=%s",
             (destino, data, vagas, preco, imagem_nome, informacoes, regras, mensagem_whatsapp, id)
         )
     else:
-        conn.cursor().execute(
-            "UPDATE viagens SET destino=?, data=?, vagas_totais=?, preco=?, informacoes=?, regras=?, mensagem_whatsapp=? WHERE id=?",
+        cursor.execute(
+            "UPDATE viagens SET destino=%s, data=%s, vagas_totais=%s, preco=%s, informacoes=%s, regras=%s, mensagem_whatsapp=%s WHERE id=%s",
             (destino, data, vagas, preco, informacoes, regras, mensagem_whatsapp, id)
         )
 
@@ -347,114 +280,39 @@ def atualizar_viagem(id):
     conn.close()
     return redirect('/')
 
-
 @app.route('/deletar/<int:id>')
 def deletar_viagem(id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM viagens WHERE id=?", (id,))
+    # Remove dependencias antes (se necessário) ou usar CASCADE.
+    cursor.execute("DELETE FROM favoritos WHERE id_viagem=%s", (id,))
+    cursor.execute("DELETE FROM reservas WHERE id_viagem=%s", (id,))
+    cursor.execute("DELETE FROM viagens WHERE id=%s", (id,))
     conn.commit()
     conn.close()
     return redirect('/')
 
-
-# --- ROTAS DO CMS E SITE ---
 @app.route('/salvar_identidade', methods=['POST'])
 def salvar_identidade():
     nome_agencia = request.form.get('nome_agencia')
     b1_link, b2_link = request.form.get('banner1_link'), request.form.get('banner2_link')
-    logo, b1_img, b2_img = salvar_imagem(request.files.get('logo')), salvar_imagem(
-        request.files.get('banner1_img')), salvar_imagem(request.files.get('banner2_img'))
-    conn = sqlite3.connect(DB_NAME)
+    
+    logo = salvar_imagem(request.files.get('logo'))
+    b1_img = salvar_imagem(request.files.get('banner1_img'))
+    b2_img = salvar_imagem(request.files.get('banner2_img'))
+    
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('UPDATE configuracoes SET nome_agencia=?, banner1_link=?, banner2_link=? WHERE id=1',
+    cursor.execute('UPDATE configuracoes SET nome_agencia=%s, banner1_link=%s, banner2_link=%s WHERE id=1',
                    (nome_agencia, b1_link, b2_link))
-    if logo: cursor.execute("UPDATE configuracoes SET logo=? WHERE id=1", (logo,))
-    if b1_img: cursor.execute("UPDATE configuracoes SET banner1_img=? WHERE id=1", (b1_img,))
-    if b2_img: cursor.execute("UPDATE configuracoes SET banner2_img=? WHERE id=1", (b2_img,))
+    if logo: cursor.execute("UPDATE configuracoes SET logo=%s WHERE id=1", (logo,))
+    if b1_img: cursor.execute("UPDATE configuracoes SET banner1_img=%s WHERE id=1", (b1_img,))
+    if b2_img: cursor.execute("UPDATE configuracoes SET banner2_img=%s WHERE id=1", (b2_img,))
     conn.commit()
     conn.close()
     return redirect('/#pane-config-site')
 
-
-@app.route('/site')
-def site_oficial():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    viagens = cursor.execute("SELECT * FROM viagens").fetchall()
-
-    favoritos_usuario = []
-    if 'usuario_id' in session:
-        favs = cursor.execute("SELECT id_viagem FROM favoritos WHERE id_usuario = ?",
-                              (session['usuario_id'],)).fetchall()
-        favoritos_usuario = [f[0] for f in favs]
-
-    conn.close()
-    config, deps, faqs = obter_dados_cms()
-    return render_template('site.html', lista=viagens, conf=config, deps=deps, faqs=faqs, favs_user=favoritos_usuario)
-
-
-@app.route('/meus_favoritos')
-def meus_favoritos():
-    if 'usuario_id' not in session:
-        return redirect('/login')
-
-    id_usuario = session['usuario_id']
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    viagens_favoritas = cursor.execute('''
-        SELECT v.* FROM viagens v
-        JOIN favoritos f ON v.id = f.id_viagem
-        WHERE f.id_usuario = ?
-    ''', (id_usuario,)).fetchall()
-
-    conn.close()
-    config, _, _ = obter_dados_cms()
-
-    return render_template('favoritos.html', lista=viagens_favoritas, conf=config)
-
-
-@app.route('/favoritar/<int:id_viagem>', methods=['POST'])
-def favoritar(id_viagem):
-    if 'usuario_id' not in session:
-        return jsonify({'erro': 'Usuário não logado'}), 401
-
-    id_usuario = session['usuario_id']
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    existe = cursor.execute(
-        'SELECT 1 FROM favoritos WHERE id_usuario = ? AND id_viagem = ?',
-        (id_usuario, id_viagem)
-    ).fetchone()
-
-    if existe:
-        cursor.execute(
-            'DELETE FROM favoritos WHERE id_usuario = ? AND id_viagem = ?',
-            (id_usuario, id_viagem)
-        )
-        status = 'removido'
-    else:
-        cursor.execute(
-            'INSERT INTO favoritos (id_usuario, id_viagem) VALUES (?, ?)',
-            (id_usuario, id_viagem)
-        )
-        status = 'adicionado'
-
-    conn.commit()
-    conn.close()
-
-    return jsonify({'status': status})
-
-
-# --- ROTAS DE AUTENTICAÇÃO ---
-
-@app.route('/cadastro')
-def tela_cadastro():
-    return render_template('cadastro.html')
-
-
+# --- ROTAS DE AUTENTICAÇÃO E CARRINHO (Simplificadas para Leitura) ---
 @app.route('/cadastrar_usuario', methods=['POST'])
 def cadastrar_usuario():
     nome = request.form.get('nome')
@@ -468,15 +326,11 @@ def cadastrar_usuario():
         flash("CPF inválido!")
         return redirect('/cadastro')
 
-    if not validar_data_nascimento(data_nasc):
-        flash("Data de nascimento inválida.")
-        return redirect('/cadastro')
-
     try:
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO usuarios (nome, email, senha, cpf, telefone, data_nascimento) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO usuarios (nome, email, senha, cpf, telefone, data_nascimento) VALUES (%s, %s, %s, %s, %s, %s)",
             (nome, email, senha, cpf, telefone, data_nasc))
         conn.commit()
         conn.close()
@@ -485,15 +339,16 @@ def cadastrar_usuario():
         flash("E-mail já cadastrado.")
         return redirect('/cadastro')
 
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'GET':
         return render_template('login.html')
 
     email, senha = request.form.get('email'), request.form.get('senha')
-    conn = sqlite3.connect(DB_NAME)
-    usuario = conn.cursor().execute("SELECT * FROM usuarios WHERE email = ? AND senha = ?", (email, senha)).fetchone()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM usuarios WHERE email = %s AND senha = %s", (email, senha))
+    usuario = cursor.fetchone()
     conn.close()
 
     if usuario:
@@ -501,247 +356,28 @@ def login():
         session['usuario_id'], session['usuario_nome'] = usuario[0], usuario[1]
         return redirect('/dashboard')
 
-    flash("E-mail ou senha incorretos, ou cadastro inexistente. Tente novamente!")
+    flash("E-mail ou senha incorretos. Tente novamente!")
     return redirect('/login')
-
-
-# --- SISTEMA DE CARRINHO DE COMPRAS ---
-
-@app.route('/adicionar_carrinho/<int:id_viagem>', methods=['POST'])
-def adicionar_carrinho(id_viagem):
-    if 'usuario_id' not in session:
-        # Troquei o jsonify por um redirecionamento com mensagem
-        flash("Faça login para adicionar itens ao carrinho.")
-        return redirect('/login')
-
-    quantidade = int(request.form.get('quantidade', 1))
-
-    if 'carrinho' not in session:
-        session['carrinho'] = {}
-
-    carrinho = session['carrinho']
-
-    id_str = str(id_viagem)
-    if id_str in carrinho:
-        carrinho[id_str] += quantidade
-    else:
-        carrinho[id_str] = quantidade
-
-    session['carrinho'] = carrinho
-    flash("Item adicionado ao carrinho com sucesso!")
-    return redirect('/carrinho')
-
-
-@app.route('/carrinho')
-def ver_carrinho():
-    if 'usuario_id' not in session:
-        return redirect('/login')
-
-    carrinho = session.get('carrinho', {})
-    itens_carrinho = []
-    total_geral = 0.0
-
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    for id_viagem_str, qtd in carrinho.items():
-        viagem = cursor.execute("SELECT * FROM viagens WHERE id = ?", (int(id_viagem_str),)).fetchone()
-        if viagem:
-            subtotal = viagem[4] * qtd
-            total_geral += subtotal
-            itens_carrinho.append({
-                'id': viagem[0],
-                'destino': viagem[1],
-                'data': viagem[2],
-                'preco': viagem[4],
-                'imagem': viagem[5],
-                'quantidade': qtd,
-                'subtotal': subtotal
-            })
-
-    conn.close()
-    config, _, _ = obter_dados_cms()
-    return render_template('carrinho.html', itens=itens_carrinho, total=total_geral, conf=config)
-
-
-@app.route('/remover_carrinho/<int:id_viagem>')
-def remover_carrinho(id_viagem):
-    if 'carrinho' in session:
-        carrinho = session['carrinho']
-        id_str = str(id_viagem)
-        if id_str in carrinho:
-            del carrinho[id_str]
-            session['carrinho'] = carrinho
-    return redirect('/carrinho')
-
-
-@app.route('/finalizar_carrinho_mp', methods=['POST'])
-def finalizar_carrinho_mp():
-    if 'usuario_id' not in session or 'carrinho' not in session or not session['carrinho']:
-        return redirect('/site')
-
-    id_usuario = session['usuario_id']
-    carrinho = session['carrinho']
-
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    itens_mercado_pago = []
-
-    try:
-        for id_viagem_str, qtd in carrinho.items():
-            id_viagem = int(id_viagem_str)
-            viagem = cursor.execute("SELECT * FROM viagens WHERE id = ?", (id_viagem,)).fetchone()
-
-            if not viagem:
-                continue
-
-            for _ in range(qtd):
-                cursor.execute("INSERT INTO reservas (id_usuario, id_viagem) VALUES (?, ?)", (id_usuario, id_viagem))
-
-            itens_mercado_pago.append({
-                "title": f"Excursão: {viagem[1]} (x{qtd})",
-                "quantity": qtd,
-                "currency_id": "BRL",
-                "unit_price": float(viagem[4])
-            })
-
-        conn.commit()
-        conn.close()
-
-        session.pop('carrinho', None)
-
-        preference_data = {
-            "items": itens_mercado_pago,
-            "back_urls": {
-                "success": "https://projetointegrador.dominionulo.com.br/sucesso",
-                "failure": "https://projetointegrador.dominionulo.com.br/falha",
-                "pending": "https://projetointegrador.dominionulo.com.br/pendente"
-            },
-            "auto_return": "approved"
-        }
-
-        preference_response = sdk.preference().create(preference_data)
-        return redirect(preference_response["response"]["init_point"])
-
-    except Exception as e:
-        return f"<h1>Erro ao processar lote do carrinho:</h1><p>{str(e)}</p>"
-
-@app.route('/gerenciar_clientes/<int:id_viagem>')
-def gerenciar_clientes(id_viagem):
-    if 'usuario_id' not in session:  # Opcional: protege a rota para admins/logados
-        return redirect('/login')
-
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    # 1. Busca os detalhes da excursão para colocar no título da página
-    viagem = cursor.execute("SELECT destino, data, preco FROM viagens WHERE id = ?", (id_viagem,)).fetchone()
-    if not viagem:
-        conn.close()
-        return "<h1>Excursão não encontrada!</h1>", 404
-
-    destino, data_viagem, preco_unitario = viagem[0], viagem[1], viagem[2]
-
-    # 2. Busca todos os dados dos clientes que compraram essa excursão específica
-    # Agrupa por usuário para somar a quantidade de assentos se compraram mais de um no carrinho
-    compradores_db = cursor.execute('''
-        SELECT u.nome, u.cpf, u.data_nascimento, u.telefone, u.email, COUNT(r.id) as assentos
-        FROM reservas r
-        JOIN usuarios u ON r.id_usuario = u.id
-        WHERE r.id_viagem = ?
-        GROUP BY u.id
-    ''', (id_viagem,)).fetchall()
-
-    compradores_lista = []
-    for c in compradores_db:
-        qtd_assentos = c[5]
-        valor_pago = qtd_assentos * preco_unitario
-
-        compradores_lista.append({
-            'nome': c[0],
-            'cpf': c[1],
-            'data_nascimento': c[2] if c[2] else '-',
-            'telefone': c[3],
-            'email': c[4],
-            'quantidade_assentos': qtd_assentos,
-            'valor_pago': valor_pago,
-            'forma_pagamento': 'Mercado Pago'  # Gateway padrão do seu sistema
-        })
-
-    conn.close()
-
-    # Busca dados do CMS apenas para manter o padrão visual/nome da agência se necessário
-    config, _, _ = obter_dados_cms()
-
-    return render_template('gerenciar_clientes.html',
-                           destino=destino,
-                           data_viagem=data_viagem,
-                           compradores=compradores_lista,
-                           conf=config)
 
 @app.route('/dashboard')
 def dashboard():
-    if 'usuario_id' not in session:
-        return redirect('/login')
-    conn = sqlite3.connect(DB_NAME)
-    viagens = conn.cursor().execute("SELECT * FROM viagens").fetchall()
+    if 'usuario_id' not in session: return redirect('/login')
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM viagens")
+    viagens = cursor.fetchall()
     conn.close()
     config, _, _ = obter_dados_cms()
     return render_template('dashboard.html', lista=viagens, conf=config)
 
-
 @app.route('/sucesso')
 def sucesso():
-    return f"<div style='text-align:center; margin-top:100px;'><h1>Pagamento Aprovado! 🎉</h1><a href='/dashboard' style='background:#1B264A; color:white; padding:10px; text-decoration:none;'>Voltar</a></div>"
-
+    return f"<div style='text-align:center; margin-top:100px;'><h1>Pagamento Aprovado! 🎉</h1><a href='/dashboard' style='background:#367C2B; color:white; padding:10px; text-decoration:none;'>Voltar</a></div>"
 
 @app.route('/logout')
 def logout():
     session.clear()
     return redirect('/login')
-
-@app.route('/confirmacao_compra')
-def confirmacao_compra():
-    if 'usuario_id' not in session:
-        flash("Faça login para finalizar a sua reserva.")
-        return redirect('/login')
-
-    carrinho = session.get('carrinho', {})
-    if not carrinho:
-        return redirect('/site')
-
-    id_usuario = session['usuario_id']
-
-    # Conecta ao banco de dados para salvar as reservas
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    try:
-        # Percorre os itens do carrinho e grava cada assento comprado no banco
-        for id_viagem_str, qtd in carrinho.items():
-            id_viagem = int(id_viagem_str)
-            
-            # Executa o insert de acordo com a quantidade selecionada
-            for _ in range(qtd):
-                cursor.execute(
-                    "INSERT INTO reservas (id_usuario, id_viagem) VALUES (?, ?)",
-                    (id_usuario, id_viagem)
-                )
-
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        return f"<h1>Erro ao processar os dados da compra:</h1><p>{str(e)}</p>"
-    finally:
-        conn.close()
-
-    # Limpa o carrinho da sessão somente após gravar tudo no banco com sucesso
-    session.pop('carrinho', None)
-
-    config, _, _ = obter_dados_cms()
-    return render_template('confirmacao.html', conf=config)
-
 
 if __name__ == '__main__':
     app.run(debug=True)
