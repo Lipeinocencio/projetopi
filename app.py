@@ -3,8 +3,6 @@ import sqlite3
 import mercadopago
 import re
 import json  # ← Adicionado para fazer a conversão dos dados dos clientes para a Modal
-import cloudinary
-import cloudinary.uploader
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, session, flash, jsonify
 from werkzeug.utils import secure_filename
@@ -15,12 +13,6 @@ app.secret_key = 'chave_secreta_anderson_excursoes'
 # Configuração para manter o usuário logado
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)  # Mantém logado por 30 dias
 
-# --- CONFIGURAÇÃO CLOUDINARY (Imagens na Nuvem) ---
-cloudinary.config(
-    cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME'),
-    api_key = os.environ.get('CLOUDINARY_API_KEY'),
-    api_secret = os.environ.get('CLOUDINARY_API_SECRET')
-)
 
 # --- 1. FUNÇÕES DE VALIDAÇÃO ---
 
@@ -57,12 +49,12 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # --- CREDENCIAL DO MERCADO PAGO ---
 sdk = mercadopago.SDK("APP_USR-4508380654619786-050619-e6b70695379fd4e5cdd4ded2c2614463-3384502064")
 
-# --- FUNÇÃO DE IMAGENS ALTERADA (Agora vai para o Cloudinary) ---
+
 def salvar_imagem(file_obj):
     if file_obj and file_obj.filename != '':
-        # Faz o upload diretamente para o Cloudinary e guarda a URL da imagem
-        upload_result = cloudinary.uploader.upload(file_obj)
-        return upload_result['secure_url']
+        nome = secure_filename(file_obj.filename)
+        file_obj.save(os.path.join(app.config['UPLOAD_FOLDER'], nome))
+        return nome
     return None
 
 
