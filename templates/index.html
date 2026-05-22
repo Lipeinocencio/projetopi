@@ -1,285 +1,252 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Controle - PI Excursões</title>
+    <title>Painel Administrativo | {{ conf[1] if conf else 'Agência' }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <style>
+        /* Identidade Visual da Marca */
+        .bg-brand { background-color: #367C2B !important; }
+        .text-brand { color: #367C2B !important; }
+        .btn-brand { background-color: #367C2B; color: white; border: none; }
+        .btn-brand:hover { background-color: #2b6322; color: white; }
+        
         body { background-color: #f8f9fa; }
-        .sidebar { background-color: #1c2833; min-height: 100vh; color: white; padding-top: 20px; }
-        .sidebar a { color: #adb5bd; text-decoration: none; padding: 15px 20px; display: block; font-weight: bold; transition: 0.3s; cursor: pointer; }
-        .sidebar a:hover, .sidebar a.active { background-color: #2980b9; color: white; border-left: 4px solid #fff; }
-        .card { border: none; box-shadow: 0 4px 8px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        .section-separator { border-top: 1px dashed #ccc; margin: 25px 0; }
-        .form-section-title { font-size: 0.95rem; font-weight: bold; color: #495057; text-transform: uppercase; margin-bottom: 15px; }
-        .btn-primary { background-color: #2980b9; border: none; }
-        .btn-primary:hover { background-color: #1f6391; }
+        .nav-tabs .nav-link { color: #495057; font-weight: 500; }
+        .nav-tabs .nav-link.active { border-top: 3px solid #367C2B; color: #367C2B; font-weight: bold; background-color: #fff; }
+        .card-stat { border-left: 4px solid #367C2B; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
     </style>
 </head>
 <body>
 
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-md-2 sidebar p-0">
-            <h4 class="text-center mb-4 text-white">PI Excursões</h4>
-            <div class="nav flex-column nav-pills" id="v-pills-tab">
-                <a class="nav-link active" onclick="trocarAba(this, 'pane-dashboard')">Excursões Ativas</a>
-                <a class="nav-link" onclick="trocarAba(this, 'pane-clientes')">Clientes e Reservas</a>
-                <a class="nav-link" onclick="trocarAba(this, 'pane-gestao-mensagens')">Gestão de Mensagens</a>
-                <a class="nav-link" onclick="trocarAba(this, 'pane-nova-viagem')">Adicionar Viagem</a>
-                <a class="nav-link" onclick="trocarAba(this, 'pane-config-site')">Configurar Site</a>
-                <hr class="text-light mx-3">
-                <a class="nav-link text-white" href="/site" target="_blank">Ver Site Online</a>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-brand mb-4 shadow-sm">
+        <div class="container-fluid">
+            <a class="navbar-brand fw-bold" href="#"><i class="bi bi-shield-lock-fill me-2"></i>Painel Admin - {{ conf[1] if conf else 'Agência' }}</a>
+            <div class="d-flex">
+                <a href="/site" class="btn btn-outline-light btn-sm me-3" target="_blank"><i class="bi bi-box-arrow-up-right me-1"></i> Ver Site</a>
+                <a href="/logout" class="btn btn-danger btn-sm"><i class="bi bi-box-arrow-right me-1"></i> Sair</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 pb-5">
+        
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card card-stat border-0 rounded-3 p-3">
+                    <h6 class="text-muted text-uppercase mb-1" style="font-size: 0.8rem;">Eventos Ativos</h6>
+                    <h3 class="mb-0 text-dark">{{ stats.viagens }}</h3>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-stat border-0 rounded-3 p-3">
+                    <h6 class="text-muted text-uppercase mb-1" style="font-size: 0.8rem;">Clientes Cadastrados</h6>
+                    <h3 class="mb-0 text-dark">{{ stats.clientes }}</h3>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-stat border-0 rounded-3 p-3">
+                    <h6 class="text-muted text-uppercase mb-1" style="font-size: 0.8rem;">Assentos Vendidos</h6>
+                    <h3 class="mb-0 text-dark">{{ stats.reservas }}</h3>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-stat border-0 rounded-3 p-3 bg-brand text-white" style="border-left: none;">
+                    <h6 class="text-white-50 text-uppercase mb-1" style="font-size: 0.8rem;">Faturamento Total</h6>
+                    <h3 class="mb-0">R$ {{ stats.faturamento }}</h3>
+                </div>
             </div>
         </div>
 
-        <div class="col-md-10 p-5">
-            <div class="tab-content" id="v-pills-tabContent">
+        <ul class="nav nav-tabs" id="painelTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="eventos-tab" data-bs-toggle="tab" data-bs-target="#eventos" type="button" role="tab"><i class="bi bi-calendar-event me-2"></i>Shows e Excursões</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="clientes-tab" data-bs-toggle="tab" data-bs-target="#clientes" type="button" role="tab"><i class="bi bi-people me-2"></i>Base de Clientes</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="config-tab" data-bs-toggle="tab" data-bs-target="#config" type="button" role="tab"><i class="bi bi-gear me-2"></i>Configurações do Site</button>
+            </li>
+        </ul>
 
-                <div class="tab-pane fade show active" id="pane-dashboard">
-                    <h2 class="mb-4">Gerenciamento de Excursões</h2>
-                    <div class="card p-4">
-                        <table class="table table-hover align-middle">
-                            <thead class="table-dark">
-                                <tr><th>Foto</th><th>Destino</th><th>Data</th><th>Vagas</th><th>Preço</th><th>Ações</th></tr>
-                            </thead>
-                            <tbody>
-                                {% for v in lista %}
-                                <tr>
-                                    <td>{% if v[5] %}<img src="{{ v[5] }}" width="80">{% endif %}</td>" style="width: 60px; height: 45px; object-fit: cover; border-radius: 4px;">{% else %}<span class="text-muted small">Sem foto</span>{% endif %}</td>
-                                    <td><strong>{{ v[1] }}</strong></td><td>{{ v[2] }}</td><td>{{ v[3] }}</td><td>R$ {{ v[4] }}</td>
-                                    <td>
-                                        <a href="/editar/{{ v[0] }}" class="btn btn-sm btn-secondary me-2">Editar</a>
-                                        <a href="/deletar/{{ v[0] }}" class="btn btn-sm btn-danger" onclick="return confirm('Tem certeza que deseja excluir a excursão para {{ v[1] }}?');">Excluir</a>
-                                    </td>
-                                </tr>
-                                {% else %}
-                                <tr><td colspan="6" class="text-center py-4">Nenhuma excursão cadastrada.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+        <div class="tab-content bg-white p-4 border border-top-0 rounded-bottom shadow-sm" id="painelTabsContent">
+            
+            <div class="tab-pane fade show active" id="eventos" role="tabpanel">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h4 class="mb-0 text-brand">Gerenciar Eventos</h4>
+                    <button class="btn btn-brand" data-bs-toggle="modal" data-bs-target="#modalNovoEvento">
+                        <i class="bi bi-plus-circle me-1"></i> Novo Evento
+                    </button>
                 </div>
 
-                <div class="tab-pane fade d-none" id="pane-clientes">
-                    <h2 class="mb-4">Base de Clientes e Reservas</h2>
-                    <div class="card p-4">
-                        <table class="table table-hover align-middle">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th>Cliente</th>
-                                    <th>Contatos</th>
-                                    <th>Viagens Compradas</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for c in clientes %}
-                                <tr>
-                                    <td>
-                                        <strong>{{ c.nome }}</strong><br>
-                                        <small class="text-muted">CPF: {{ c.cpf }}</small>
-                                    </td>
-                                    <td>
-                                        {{ c.email }}<br>
-                                        {{ c.telefone }}
-                                    </td>
-                                    <td>
-                                        {% if c.compras %}
-                                            <ul class="mb-0" style="padding-left: 20px;">
-                                            {% for compra in c.compras %}
-                                                <li><strong>{{ compra[0] }}</strong> <small class="text-muted">({{ compra[1] }})</small></li>
-                                            {% endfor %}
-                                            </ul>
-                                        {% else %}
-                                            <span class="text-muted small">Nenhuma viagem comprada</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% else %}
-                                <tr><td colspan="3" class="text-center py-4">Nenhum cliente cadastrado ainda.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="tab-pane fade d-none" id="pane-gestao-mensagens">
-                    <h2 class="mb-4">Gestão de Mensagens</h2>
-                    <div class="card p-4">
-                        <p class="text-muted mb-4">Selecione uma viagem abaixo para visualizar os compradores e disparar as mensagens.</p>
-
-                        <div class="table-responsive">
-                            <table class="table table-hover align-middle border">
-                                <thead class="table-dark">
-                                    <tr>
-                                        <th>Nome da Viagem</th>
-                                        <th>Quantidade de Compradores</th>
-                                        <th>Data do Evento</th>
-                                        <th class="text-end">Ações</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for v in lista %}
-                                    <tr>
-                                        <td>
-                                            <strong>{{ v[1] }}</strong>
-                                        </td>
-                                        <td>
-                                            <span class="fw-bold">{{ v.compras|length if v.compras else 0 }}</span>
-                                        </td>
-                                        <td>
-                                            <span class="badge bg-light text-dark border">{{ v[2] }}</span>
-                                        </td>
-                                        <td class="text-end">
-                                            <a href="/gerenciar_clientes/{{ v[0] }}" class="btn btn-sm btn-primary fw-bold">
-                                                <i class="bi bi-people-fill"></i> Gerenciar Clientes
-                                            </a>
-                                        </td>
-                                    </tr>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Capa</th>
+                                <th>Destino / Evento</th>
+                                <th>Data</th>
+                                <th>Vagas</th>
+                                <th>Preço</th>
+                                <th class="text-center">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for v in lista %}
+                            <tr>
+                                <td>
+                                    {% if v[5] %}
+                                        <img src="{{ v[5] }}" style="width: 60px; height: 45px; object-fit: cover; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                                     {% else %}
-                                    <tr>
-                                        <td colspan="4" class="text-center py-4 text-muted">
-                                            <i class="bi bi-exclamation-circle d-block mb-2" style="font-size: 1.5rem;"></i>
-                                            Nenhuma viagem registrada no sistema.
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
+                                        <div style="width: 60px; height: 45px; background: #eee; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+                                            <i class="bi bi-image text-muted"></i>
+                                        </div>
+                                    {% endif %}
+                                </td>
+                                <td class="fw-bold">{{ v[1] }}</td>
+                                <td>{{ v[2] }}</td>
+                                <td>{{ v[3] }}</td>
+                                <td>R$ {{ v[4] }}</td>
+                                <td class="text-center">
+                                    <a href="/gerenciar_clientes/{{ v[0] }}" class="btn btn-sm btn-info text-white" title="Ver Compradores"><i class="bi bi-people-fill"></i></a>
+                                    <a href="/editar/{{ v[0] }}" class="btn btn-sm btn-warning text-dark" title="Editar"><i class="bi bi-pencil-square"></i></a>
+                                    <a href="/deletar/{{ v[0] }}" class="btn btn-sm btn-danger" title="Excluir" onclick="return confirm('Tem certeza que deseja excluir este evento?');"><i class="bi bi-trash"></i></a>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center py-4 text-muted">Nenhum evento cadastrado no momento.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
+            </div>
 
-                <div class="tab-pane fade d-none" id="pane-nova-viagem">
-                    <h2 class="mb-4">Lançar Nova Excursão</h2>
-                    <div class="card p-4" style="max-width: 600px;">
-                        <form action="/cadastrar" method="post" enctype="multipart/form-data">
-                            <div class="mb-3"><label class="form-label fw-bold">Destino</label><input type="text" name="destino" class="form-control" required></div>
-                            <div class="mb-3"><label class="form-label fw-bold">Data da Viagem</label><input type="text" name="data" class="form-control" required></div>
-                            <div class="mb-3"><label class="form-label fw-bold">Vagas totais</label><input type="number" name="vagas" class="form-control" required></div>
-                            <div class="mb-3"><label class="form-label fw-bold">Preço (R$)</label><input type="number" step="0.01" name="preco" class="form-control" required></div>
-
-                            <div class="mb-4">
-                                <label class="form-label fw-bold">Imagem da viagem</label>
-                                <input type="file" name="imagem" class="form-control" accept="image/*">
-                                <small class="text-muted d-block mt-1">
-                                    <i class="bi bi-info-circle-fill text-primary"></i>
-                                    <strong>Dica:</strong> Proporção fotográfica 4:3 (Recomendado: <strong>800x600px</strong>) para manter os cards alinhados.
-                                </small>
-                            </div>
-
-                            <div class="mb-3"><label class="form-label fw-bold">📋 Informações Importantes</label><textarea name="informacoes" class="form-control" rows="3" required placeholder="Escreva os detalhes e destaques do evento..."></textarea></div>
-                            <div class="mb-3"><label class="form-label fw-bold">🚫 Classificação e Regras</label><textarea name="regras" class="form-control" rows="3" placeholder="Ex: Menores de 18 anos apenas acompanhados..." required></textarea></div>
-                            <button type="submit" class="btn btn-primary w-100 py-2 fw-bold">Lançar Viagem</button>
-                        </form>
-                    </div>
+            <div class="tab-pane fade" id="clientes" role="tabpanel">
+                <h4 class="mb-4 text-brand">Base de Clientes</h4>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-striped align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Nome</th>
+                                <th>E-mail</th>
+                                <th>CPF</th>
+                                <th>WhatsApp</th>
+                                <th>Eventos Comprados</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for c in clientes %}
+                            <tr>
+                                <td class="fw-bold">{{ c.nome }}</td>
+                                <td>{{ c.email }}</td>
+                                <td>{{ c.cpf }}</td>
+                                <td>{{ c.telefone }}</td>
+                                <td>
+                                    {% if c.compras %}
+                                        <ul class="mb-0 ps-3">
+                                            {% for compra in c.compras %}
+                                                <li>{{ compra[0] }} <small class="text-muted">({{ compra[1] }})</small></li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% else %}
+                                        <span class="text-muted small">Nenhuma compra</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
+            </div>
 
-                <div class="tab-pane fade d-none" id="pane-config-site">
-                    <h2 class="mb-4">Personalização do Site Oficial</h2>
+            <div class="tab-pane fade" id="config" role="tabpanel">
+                <h4 class="mb-4 text-brand">Configurações e Identidade do Site</h4>
+                <form action="/salvar_identidade" method="POST" enctype="multipart/form-data">
                     <div class="row">
-                        <div class="col-md-6">
-                            <div class="card p-4">
-                                <h4 class="mb-4">Banners e Identidade</h4>
-                                <form action="/salvar_identidade" method="post" enctype="multipart/form-data">
-                                    <div class="mb-3"><label class="fw-bold">Nome da Agência</label><input type="text" name="nome_agencia" class="form-control" value="{{ conf[1] }}"></div>
-                                    <div class="mb-3"><label class="fw-bold">Logotipo Oficial</label><input type="file" name="logo" class="form-control" accept="image/*"></div>
-                                    <div class="section-separator"></div>
-
-                                    <h5 class="form-section-title">Banners Clicáveis</h5>
-                                    <div class="alert alert-sm alert-info p-2 mb-3 rounded" style="font-size: 0.85rem;">
-                                        <i class="bi bi-info-circle-fill"></i> <strong>Aviso do Carrossel:</strong> Use o formato panorâmico 16:4 (1920x500px).
-                                    </div>
-
-                                    <div class="bg-light p-3 border rounded mb-3">
-                                        <h6 class="fw-bold mb-3">Banner 1</h6>
-                                        <div class="mb-3"><label class="small text-muted">Imagem</label><input type="file" name="banner1_img" class="form-control form-control-sm" accept="image/*"></div>
-                                        <div class="mb-2"><label class="small text-muted">Link (URL)</label><input type="text" name="banner1_link" class="form-control form-control-sm" value="{{ conf[4] }}"></div>
-                                    </div>
-                                    <div class="bg-light p-3 border rounded mb-3">
-                                        <h6 class="fw-bold mb-3">Banner 2</h6>
-                                        <div class="mb-3"><label class="small text-muted">Imagem</label><input type="file" name="banner2_img" class="form-control form-control-sm" accept="image/*"></div>
-                                        <div class="mb-2"><label class="small text-muted">Link (URL)</label><input type="text" name="banner2_link" class="form-control form-control-sm" value="{{ conf[6] }}"></div>
-                                    </div>
-                                    <button type="submit" class="btn btn-primary w-100 fw-bold">Salvar Banners e Identidade</button>
-                                </form>
-                            </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Nome da Agência / Marca</label>
+                            <input type="text" class="form-control" name="nome_agencia" value="{{ conf[1] if conf else '' }}" required>
                         </div>
-                        <div class="col-md-6">
-                            <div class="card p-4 mb-4">
-                                <form action="/salvar_passo" method="post">
-                                    <h5 class="form-section-title">Seção "Como Funciona"</h5>
-                                    <div class="mb-2"><label class="small fw-bold">Título</label><input type="text" name="passo1_tit" class="form-control form-control-sm" value="{{ conf[7] }}"></div>
-                                    <div class="mb-3"><label class="small fw-bold">Descrição</label><textarea name="passo1_desc" class="form-control form-control-sm" rows="2">{{ conf[8] }}</textarea></div>
-                                    <button type="submit" class="btn btn-secondary btn-sm w-100">Atualizar Texto</button>
-                                </form>
-                            </div>
-                            <div class="card p-4 mb-4">
-                                <h5 class="form-section-title">Depoimentos</h5>
-                                <ul class="list-group mb-4">
-                                    {% for d in deps %}
-                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                        <div><strong>{{ d[1] }}</strong><br><small class="text-muted">"{{ d[3] }}"</small></div>
-                                        <a href="/del_depoimento/{{ d[0] }}" class="btn btn-sm btn-danger fw-bold">X</a>
-                                    </li>
-                                    {% endfor %}
-                                </ul>
-                                <form action="/add_depoimento" method="post" class="bg-light p-3 border rounded">
-                                    <div class="mb-2"><input type="text" name="nome" class="form-control form-control-sm" placeholder="Nome do Cliente" required></div>
-                                    <div class="mb-2"><input type="number" name="nota" class="form-control form-control-sm" placeholder="Nota 1-5" min="1" max="5" required></div>
-                                    <div class="mb-3"><textarea name="texto" class="form-control form-control-sm" placeholder="Mensagem..." required rows="2"></textarea></div>
-                                    <button type="submit" class="btn btn-success btn-sm w-100 fw-bold">Adicionar Depoimento</button>
-                                </form>
-                            </div>
-                            <div class="card p-4">
-                                <h5 class="form-section-title">FAQ</h5>
-                                <ul class="list-group mb-4">
-                                    {% for f in faqs %}
-                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                        <div><strong>{{ f[1] }}</strong></div>
-                                        <a href="/del_faq/{{ f[0] }}" class="btn btn-sm btn-danger fw-bold">X</a>
-                                    </li>
-                                    {% endfor %}
-                                </ul>
-                                <form action="/add_faq" method="post" class="bg-light p-3 border rounded">
-                                    <div class="mb-2"><input type="text" name="pergunta" class="form-control form-control-sm" placeholder="Pergunta" required></div>
-                                    <div class="mb-3"><textarea name="resposta" class="form-control form-control-sm" placeholder="Resposta" required rows="2"></textarea></div>
-                                    <button type="submit" class="btn btn-success btn-sm w-100 fw-bold">Adicionar FAQ</button>
-                                </form>
-                            </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Logo (Deixe em branco para manter a atual)</label>
+                            <input type="file" class="form-control" name="logo" accept="image/*">
                         </div>
                     </div>
-                </div>
+                    <div class="row mt-3">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Banner Principal (Topo)</label>
+                            <input type="file" class="form-control mb-2" name="banner1_img" accept="image/*">
+                            <input type="text" class="form-control" name="banner1_link" value="{{ conf[4] if conf else '#' }}" placeholder="Link de destino do banner">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Banner Secundário (Meio)</label>
+                            <input type="file" class="form-control mb-2" name="banner2_img" accept="image/*">
+                            <input type="text" class="form-control" name="banner2_link" value="{{ conf[6] if conf else '#' }}" placeholder="Link de destino do banner">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-brand mt-3 px-4"><i class="bi bi-save me-2"></i> Salvar Identidade</button>
+                </form>
+            </div>
 
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalNovoEvento" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-brand text-white">
+                    <h5 class="modal-title"><i class="bi bi-calendar-plus me-2"></i>Cadastrar Novo Evento</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="/cadastrar" method="POST" enctype="multipart/form-data">
+                    <div class="modal-body">
+                        <div class="row mb-3">
+                            <div class="col-md-8">
+                                <label class="form-label fw-bold">Destino / Nome do Show</label>
+                                <input type="text" class="form-control" name="destino" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold">Data do Evento</label>
+                                <input type="date" class="form-control" name="data" required>
+                            </div>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold">Vagas Disponíveis</label>
+                                <input type="number" class="form-control" name="vagas" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold">Preço Unitário (R$)</label>
+                                <input type="number" step="0.01" class="form-control" name="preco" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold">Capa do Evento</label>
+                                <input type="file" class="form-control" name="imagem" accept="image/*" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Informações (Embarque, Incluso, etc)</label>
+                            <textarea class="form-control" name="informacoes" rows="3"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Regras e Políticas</label>
+                            <textarea class="form-control" name="regras" rows="2"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-light">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-brand">Salvar Evento</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
-</div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bundle.min.js"></script>
-<script>
-    function trocarAba(elementoClicado, idPainelAlvo) {
-        const botoes = document.querySelectorAll('#v-pills-tab .nav-link');
-        botoes.forEach(btn => btn.classList.remove('active'));
-
-        const paineis = document.querySelectorAll('.tab-content .tab-pane');
-        paineis.forEach(painel => {
-            painel.classList.remove('show', 'active');
-            painel.classList.add('d-none');
-        });
-
-        elementoClicado.classList.add('active');
-
-        const painelAlvo = document.getElementById(idPainelAlvo);
-        if (painelAlvo) {
-            painelAlvo.classList.remove('d-none');
-            setTimeout(() => {
-                painelAlvo.classList.add('show', 'active');
-            }, 10);
-        }
-    }
-</script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
