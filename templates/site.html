@@ -72,7 +72,7 @@
         <div class="container">
             <a class="navbar-brand fw-bold d-flex align-items-center" href="/site">
                 {% if conf and conf[2] %}
-                    <img src="/static/uploads/{{ conf[2] }}" alt="Logo" height="40" class="me-2 rounded">
+                    <td>{% if v[5] %}<img src="{{ v[5] }}" width="80">{% endif %}</td>" alt="Logo" height="40" class="me-2 rounded">
                 {% endif %}
                 {{ conf[1] if conf else 'PI Excursões' }}
             </a>
