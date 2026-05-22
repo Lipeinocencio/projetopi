@@ -48,7 +48,7 @@
                             <tbody>
                                 {% for v in lista %}
                                 <tr>
-                                    <td>{% if v[5] %}<img src="{{ url_for('static', filename='uploads/' + v[5]) }}" style="width: 60px; height: 45px; object-fit: cover; border-radius: 4px;">{% else %}<span class="text-muted small">Sem foto</span>{% endif %}</td>
+                                    <td>{% if v[5] %}<img src="{{ v[5] }}" width="80">{% endif %}</td>" style="width: 60px; height: 45px; object-fit: cover; border-radius: 4px;">{% else %}<span class="text-muted small">Sem foto</span>{% endif %}</td>
                                     <td><strong>{{ v[1] }}</strong></td><td>{{ v[2] }}</td><td>{{ v[3] }}</td><td>R$ {{ v[4] }}</td>
                                     <td>
                                         <a href="/editar/{{ v[0] }}" class="btn btn-sm btn-secondary me-2">Editar</a>
