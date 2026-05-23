@@ -3,8 +3,6 @@ import sqlite3
 import mercadopago
 import re
 import json
-import cloudinary
-import cloudinary.uploader
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, session, flash, jsonify
 from werkzeug.utils import secure_filename
@@ -15,12 +13,6 @@ app.secret_key = 'chave_secreta_anderson_excursoes'
 # Configuração para manter o usuário logado
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
-# --- CONFIGURAÇÃO CLOUDINARY (Imagens na Nuvem) ---
-cloudinary.config(
-    cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME'),
-    api_key = os.environ.get('CLOUDINARY_API_KEY'),
-    api_secret = os.environ.get('CLOUDINARY_API_SECRET')
-)
 
 # --- 1. FUNÇÕES DE VALIDAÇÃO ---
 
@@ -35,6 +27,7 @@ def validar_cpf(cpf):
             return False
     return True
 
+
 def validar_data_nascimento(data_str):
     try:
         if not data_str: return False
@@ -46,7 +39,8 @@ def validar_data_nascimento(data_str):
     except (ValueError, TypeError):
         return False
 
-# --- CONFIGURAÇÃO DE BANCO E UPLOAD ---
+
+# --- CONFIGURAÇÃO DE BANCO E UPLOAD LOCAL ---
 DB_NAME = 'sistema.db'
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -55,12 +49,15 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # --- CREDENCIAL DO MERCADO PAGO ---
 sdk = mercadopago.SDK("APP_USR-4508380654619786-050619-e6b70695379fd4e5cdd4ded2c2614463-3384502064")
 
-# --- FUNÇÃO DE IMAGENS (Cloudinary) ---
+
+# --- SALVAMENTO LOCAL RESTAURADO ---
 def salvar_imagem(file_obj):
     if file_obj and file_obj.filename != '':
-        upload_result = cloudinary.uploader.upload(file_obj)
-        return upload_result['secure_url']
+        nome = secure_filename(file_obj.filename)
+        file_obj.save(os.path.join(app.config['UPLOAD_FOLDER'], nome))
+        return nome
     return None
+
 
 def inicializar_banco():
     conn = sqlite3.connect(DB_NAME)
@@ -117,18 +114,19 @@ def inicializar_banco():
         cursor.execute(
             "INSERT INTO configuracoes (id, nome_agencia, banner1_link, banner2_link, passo1_tit, passo1_desc) VALUES (1, 'Anderson Excursões', '#', '#', 'Escolha e Compre', 'Selecione o evento desejado e pague com segurança.')")
 
-    # --- 2. EXCURSÕES FIXAS (Vitrine Blindada) ---
-    cursor.execute("DELETE FROM viagens") # Remove lixos do SQLite fantasma
-    viagens_teste = [
-        ('Zeca & Alcione & Aragão - O maior encontro do samba em São Paulo', '2026-08-15', 45, 250.00, '', 'Transporte executivo com ar-condicionado. Chegada cedo para aproveitar o evento.', 'Proibido consumo de bebidas alcoólicas no interior do ônibus.', 'Olá, quero reservar minha vaga para o Maior Encontro do Samba!'),
-        ('Ed Sheeran em São Paulo', '2026-09-10', 50, 300.00, '', 'Excursão saindo na parte da manhã. Parada para almoço no caminho.', 'Tolerância de 15 minutos de atraso no embarque.', 'Olá, quero ir no show do Ed Sheeran!'),
-        ('Barão Vermelho - Hospitalidade em São Paulo', '2026-10-05', 40, 180.00, '', 'Viagem bate e volta. Ônibus animado, desembarque próximo ao local.', 'Menores de idade apenas com autorização autenticada.', 'Olá, quero ir no show do Barão Vermelho!'),
-        ('Os Garotin no Circo Voador no Rio de Janeiro', '2026-11-20', 46, 280.00, '', 'Final de semana no Rio com parada na Lapa antes do show.', 'Apresentação de documento original com foto é obrigatória.', 'Olá, quero ir no Circo Voador ver Os Garotin!')
-    ]
-    cursor.executemany(
-        "INSERT INTO viagens (destino, data, vagas_totais, preco, imagem, informacoes, regras, mensagem_whatsapp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        viagens_teste
-    )
+    # --- 2. EXCURSÕES FIXAS COM IDS ESTÁVEIS ---
+    cursor.execute("SELECT COUNT(*) FROM viagens")
+    if cursor.fetchone()[0] == 0:
+        viagens_teste = [
+            (1, 'Zeca & Alcione & Aragão - O maior encontro do samba em São Paulo', '2026-08-15', 45, 250.00, '', 'Transporte executivo com ar-condicionado. Chegada cedo para aproveitar o evento.', 'Proibido consumo de bebidas alcoólicas no interior do ônibus.', 'Olá, quero reservar minha vaga para o Maior Encontro do Samba!'),
+            (2, 'Ed Sheeran em São Paulo', '2026-09-10', 50, 300.00, '', 'Excursão saindo na parte da manhã. Parada para almoço no caminho.', 'Tolerância de 15 minutos de atraso no embarque.', 'Olá, quero ir no show do Ed Sheeran!'),
+            (3, 'Barão Vermelho - Hospitalidade em São Paulo', '2026-10-05', 40, 180.00, '', 'Viagem bate e volta. Ônibus animado, desembarque próximo ao local.', 'Menores de idade apenas com autorização autenticada.', 'Olá, quero ir no show do Barão Vermelho!'),
+            (4, 'Os Garotin no Circo Voador no Rio de Janeiro', '2026-11-20', 46, 280.00, '', 'Final de semana no Rio com parada na Lapa antes do show.', 'Apresentação de documento original com foto é obrigatória.', 'Olá, quero ir no Circo Voador ver Os Garotin!')
+        ]
+        cursor.executemany(
+            "INSERT INTO viagens (id, destino, data, vagas_totais, preco, imagem, informacoes, regras, mensagem_whatsapp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            viagens_teste
+        )
 
     # --- 3. DEPOIMENTOS FIXOS ---
     cursor.execute("SELECT COUNT(*) FROM depoimentos")
@@ -140,7 +138,7 @@ def inicializar_banco():
             ('Fernando Squisatti', 5, 'Muito bom! Sugiro apenas mais detalhes sobre horários.'),
             ('Gabriel Aquino', 5, 'Sistema muito prático, consegui fazer tudo sem precisar chamar no WhatsApp.'),
             ('Felipe Inocêncio', 5, 'Viagem tranquila e bem organizada. O site ajudou bastante.'),
-            ('Carol Zorzi', 5, 'Adorei a organização da excursão! Tudo muito bem explicado.'),
+            ('Carol Zorzi', 5, 'Adorei a organização da excursão! Tudo muito bem explained.'),
             ('José Abílio', 5, 'A experiência foi excelente! O processo de compra foi simples e rápido.')
         ]
         cursor.executemany("INSERT INTO depoimentos (nome, nota, texto) VALUES (?, ?, ?)", depoimentos_fixos)
@@ -293,7 +291,7 @@ def cadastrar():
 
     conn = sqlite3.connect(DB_NAME)
     conn.cursor().execute(
-        "INSERT INTO viagens (destino, data, vagas_totais, preco, imagem, informacoes, regras) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO viagens (destino, data, vagas_totais, preco, imagem, informacoes, rules) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (destino, data, vagas, preco, imagem_nome, informacoes, regras)
     )
     conn.commit()
@@ -322,11 +320,11 @@ def editar_viagem(id):
         config, deps, faqs = obter_dados_cms()
 
         if not viagem:
-            return f"<h1 style='color:#367C2B'>ID {id} não encontrado.</h1><p>Base de dados em uso: {DB_NAME}</p>", 200
+            return f"<h1>ID {id} não encontrado.</h1><p>Base de dados em uso: {DB_NAME}</p>", 200
 
         return render_template('editar.html', v=viagem, conf=config)
     except Exception as e:
-        return f"<h1 style='color:#367C2B'>Erro na edição:</h1><p>{str(e)}</p>", 200
+        return f"<h1>Erro na edição:</h1><p>{str(e)}</p>", 200
 
 @app.route('/atualizar/<int:id>', methods=['POST'])
 def atualizar_viagem(id):
@@ -365,7 +363,6 @@ def deletar_viagem(id):
     conn.close()
     return redirect('/')
 
-# --- ROTAS DO CMS E SITE ---
 @app.route('/salvar_identidade', methods=['POST'])
 def salvar_identidade():
     nome_agencia = request.form.get('nome_agencia')
@@ -445,7 +442,6 @@ def favoritar(id_viagem):
     conn.close()
     return jsonify({'status': status})
 
-# --- ROTAS DE AUTENTICAÇÃO ---
 @app.route('/cadastro')
 def tela_cadastro():
     return render_template('cadastro.html')
@@ -498,7 +494,6 @@ def login():
     flash("E-mail ou senha incorretos, ou cadastro inexistente. Tente novamente!")
     return redirect('/login')
 
-# --- SISTEMA DE CARRINHO DE COMPRAS ---
 @app.route('/adicionar_carrinho/<int:id_viagem>', methods=['POST'])
 def adicionar_carrinho(id_viagem):
     if 'usuario_id' not in session:
