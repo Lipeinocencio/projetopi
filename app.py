@@ -2,7 +2,9 @@ import os
 import sqlite3
 import mercadopago
 import re
-import json  # ← Adicionado para fazer a conversão dos dados dos clientes para a Modal
+import json
+import cloudinary
+import cloudinary.uploader
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, session, flash, jsonify
 from werkzeug.utils import secure_filename
@@ -11,8 +13,14 @@ app = Flask(__name__)
 app.secret_key = 'chave_secreta_anderson_excursoes'
 
 # Configuração para manter o usuário logado
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)  # Mantém logado por 30 dias
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
+# --- CONFIGURAÇÃO CLOUDINARY (Imagens na Nuvem) ---
+cloudinary.config(
+    cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME'),
+    api_key = os.environ.get('CLOUDINARY_API_KEY'),
+    api_secret = os.environ.get('CLOUDINARY_API_SECRET')
+)
 
 # --- 1. FUNÇÕES DE VALIDAÇÃO ---
 
@@ -27,7 +35,6 @@ def validar_cpf(cpf):
             return False
     return True
 
-
 def validar_data_nascimento(data_str):
     try:
         if not data_str: return False
@@ -39,8 +46,7 @@ def validar_data_nascimento(data_str):
     except (ValueError, TypeError):
         return False
 
-
-# --- CONFIGURAÇÃO PARA TESTE LOCAL ---
+# --- CONFIGURAÇÃO DE BANCO E UPLOAD ---
 DB_NAME = 'sistema.db'
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -49,20 +55,18 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # --- CREDENCIAL DO MERCADO PAGO ---
 sdk = mercadopago.SDK("APP_USR-4508380654619786-050619-e6b70695379fd4e5cdd4ded2c2614463-3384502064")
 
-
+# --- FUNÇÃO DE IMAGENS (Cloudinary) ---
 def salvar_imagem(file_obj):
     if file_obj and file_obj.filename != '':
-        nome = secure_filename(file_obj.filename)
-        file_obj.save(os.path.join(app.config['UPLOAD_FOLDER'], nome))
-        return nome
+        upload_result = cloudinary.uploader.upload(file_obj)
+        return upload_result['secure_url']
     return None
-
 
 def inicializar_banco():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    # Criação das tabelas principais caso não existam
+    # Criação das tabelas principais
     cursor.execute('''CREATE TABLE IF NOT EXISTS viagens (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, 
                         destino TEXT NOT NULL, 
@@ -73,13 +77,10 @@ def inicializar_banco():
                         informacoes TEXT,
                         regras TEXT)''')
 
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, email TEXT NOT NULL UNIQUE, senha TEXT NOT NULL, cpf TEXT NOT NULL, telefone TEXT NOT NULL, data_nascimento TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, email TEXT NOT NULL UNIQUE, senha TEXT NOT NULL, cpf TEXT NOT NULL, telefone TEXT NOT NULL, data_nascimento TEXT)''')
 
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS reservas (id INTEGER PRIMARY KEY AUTOINCREMENT, id_usuario INTEGER, id_viagem INTEGER, data_reserva TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (id_usuario) REFERENCES usuarios(id), FOREIGN KEY (id_viagem) REFERENCES viagens(id))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS reservas (id INTEGER PRIMARY KEY AUTOINCREMENT, id_usuario INTEGER, id_viagem INTEGER, data_reserva TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (id_usuario) REFERENCES usuarios(id), FOREIGN KEY (id_viagem) REFERENCES viagens(id))''')
 
-    # --- NOVA TABELA DE FAVORITOS ADICIONADA AQUI ---
     cursor.execute('''CREATE TABLE IF NOT EXISTS favoritos (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, 
                         id_usuario INTEGER, 
@@ -88,14 +89,13 @@ def inicializar_banco():
                         FOREIGN KEY (id_viagem) REFERENCES viagens(id),
                         UNIQUE(id_usuario, id_viagem))''')
 
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS configuracoes (id INTEGER PRIMARY KEY CHECK (id = 1), nome_agencia TEXT, logo TEXT, banner1_img TEXT, banner1_link TEXT, banner2_img TEXT, banner2_link TEXT, passo1_tit TEXT, passo1_desc TEXT)''')
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS depoimentos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, nota INTEGER, texto TEXT)''')
-    cursor.execute(
-        '''CREATE TABLE IF NOT EXISTS faqs (id INTEGER PRIMARY KEY AUTOINCREMENT, pergunta TEXT, resposta TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS configuracoes (id INTEGER PRIMARY KEY CHECK (id = 1), nome_agencia TEXT, logo TEXT, banner1_img TEXT, banner1_link TEXT, banner2_img TEXT, banner2_link TEXT, passo1_tit TEXT, passo1_desc TEXT)''')
+    
+    cursor.execute('''CREATE TABLE IF NOT EXISTS depoimentos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, nota INTEGER, texto TEXT)''')
+    
+    cursor.execute('''CREATE TABLE IF NOT EXISTS faqs (id INTEGER PRIMARY KEY AUTOINCREMENT, pergunta TEXT, resposta TEXT)''')
 
-    # Atualização dinâmica do banco caso o usuário já tenha criado a tabela viagens sem os novos campos
+    # Atualizações dinâmicas das colunas
     try:
         cursor.execute("ALTER TABLE viagens ADD COLUMN informacoes TEXT;")
     except sqlite3.OperationalError:
@@ -106,45 +106,61 @@ def inicializar_banco():
     except sqlite3.OperationalError:
         pass
 
-    # AUTOMATIZAÇÃO: Cria o campo mensagem_whatsapp caso ele não exista na tabela do banco oficial
     try:
         cursor.execute("ALTER TABLE viagens ADD COLUMN mensagem_whatsapp TEXT;")
     except sqlite3.OperationalError:
         pass
 
-    cursor.execute("SELECT id FROM configuracoes WHERE id=1")
-    if not cursor.fetchone():
+    # --- 1. CONFIGURAÇÕES FIXAS ---
+    cursor.execute("SELECT COUNT(*) FROM configuracoes")
+    if cursor.fetchone()[0] == 0:
         cursor.execute(
             "INSERT INTO configuracoes (id, nome_agencia, banner1_link, banner2_link, passo1_tit, passo1_desc) VALUES (1, 'Anderson Excursões', '#', '#', 'Escolha e Compre', 'Selecione o evento desejado e pague com segurança.')")
 
-        # Força a criação da coluna mensagem_whatsapp caso o banco antigo ainda persista
-        try:
-            cursor.execute("ALTER TABLE viagens ADD COLUMN mensagem_whatsapp TEXT;")
-        except sqlite3.OperationalError:
-            pass  # Se a coluna já existir, ele só ignora e não quebra o código
+    # --- 2. EXCURSÕES FIXAS (Vitrine Blindada) ---
+    cursor.execute("DELETE FROM viagens") # Remove lixos do SQLite fantasma
+    viagens_teste = [
+        ('Zeca & Alcione & Aragão - O maior encontro do samba em São Paulo', '2026-08-15', 45, 250.00, '', 'Transporte executivo com ar-condicionado. Chegada cedo para aproveitar o evento.', 'Proibido consumo de bebidas alcoólicas no interior do ônibus.', 'Olá, quero reservar minha vaga para o Maior Encontro do Samba!'),
+        ('Ed Sheeran em São Paulo', '2026-09-10', 50, 300.00, '', 'Excursão saindo na parte da manhã. Parada para almoço no caminho.', 'Tolerância de 15 minutos de atraso no embarque.', 'Olá, quero ir no show do Ed Sheeran!'),
+        ('Barão Vermelho - Hospitalidade em São Paulo', '2026-10-05', 40, 180.00, '', 'Viagem bate e volta. Ônibus animado, desembarque próximo ao local.', 'Menores de idade apenas com autorização autenticada.', 'Olá, quero ir no show do Barão Vermelho!'),
+        ('Os Garotin no Circo Voador no Rio de Janeiro', '2026-11-20', 46, 280.00, '', 'Final de semana no Rio com parada na Lapa antes do show.', 'Apresentação de documento original com foto é obrigatória.', 'Olá, quero ir no Circo Voador ver Os Garotin!')
+    ]
+    cursor.executemany(
+        "INSERT INTO viagens (destino, data, vagas_totais, preco, imagem, informacoes, regras, mensagem_whatsapp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        viagens_teste
+    )
 
-    # --- CÓDIGO PARA INSERIR EXCURSÕES FIXAS (VITRINE) AUTOMATICAMENTE ---
-    cursor.execute("SELECT COUNT(*) FROM viagens")
-    if cursor.fetchone()[0] == 0:  # Só adiciona se a tabela for apagada pelo Render
-        viagens_teste = [
-            ('Zeca & Alcione & Aragão - O maior encontro do samba em São Paulo', '2026-08-15', 45, 250.00, '', 'Transporte executivo com ar-condicionado. Chegada cedo para aproveitar o evento.', 'Proibido consumo de bebidas alcoólicas no interior do ônibus.', 'Olá, quero reservar minha vaga para o Maior Encontro do Samba!'),
-            ('Ed Sheeran em São Paulo', '2026-09-10', 50, 300.00, '', 'Excursão saindo na parte da manhã. Parada para almoço no caminho.', 'Tolerância de 15 minutos de atraso no embarque.', 'Olá, quero ir no show do Ed Sheeran!'),
-            ('Barão Vermelho - Hospitalidade em São Paulo', '2026-10-05', 40, 180.00, '', 'Viagem bate e volta. Ônibus animado, desembarque próximo ao local.', 'Menores de idade apenas com autorização autenticada.', 'Olá, quero ir no show do Barão Vermelho!'),
-            ('Os Garotin no Circo Voador no Rio de Janeiro', '2026-11-20', 46, 280.00, '', 'Final de semana no Rio com parada na Lapa antes do show.', 'Apresentação de documento original com foto é obrigatória.', 'Olá, quero ir no Circo Voador ver Os Garotin!')
+    # --- 3. DEPOIMENTOS FIXOS ---
+    cursor.execute("SELECT COUNT(*) FROM depoimentos")
+    if cursor.fetchone()[0] == 0:
+        depoimentos_fixos = [
+            ('Guilherme Bortolotti', 5, 'Gostei bastante da proposta, facilita muito o processo.'),
+            ('Marisa Santini', 5, 'Fiquei muito satisfeita com o atendimento e facilidade do site.'),
+            ('Paulo Henrique', 5, 'Excelente experiência! Tudo ocorreu conforme o planejado.'),
+            ('Fernando Squisatti', 5, 'Muito bom! Sugiro apenas mais detalhes sobre horários.'),
+            ('Gabriel Aquino', 5, 'Sistema muito prático, consegui fazer tudo sem precisar chamar no WhatsApp.'),
+            ('Felipe Inocêncio', 5, 'Viagem tranquila e bem organizada. O site ajudou bastante.'),
+            ('Carol Zorzi', 5, 'Adorei a organização da excursão! Tudo muito bem explicado.'),
+            ('José Abílio', 5, 'A experiência foi excelente! O processo de compra foi simples e rápido.')
         ]
-        
-        cursor.executemany(
-            "INSERT INTO viagens (destino, data, vagas_totais, preco, imagem, informacoes, regras, mensagem_whatsapp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            viagens_teste
-        )
-    # ------------------------------------------------------------
+        cursor.executemany("INSERT INTO depoimentos (nome, nota, texto) VALUES (?, ?, ?)", depoimentos_fixos)
+
+    # --- 4. FAQS FIXAS ---
+    cursor.execute("SELECT COUNT(*) FROM faqs")
+    if cursor.fetchone()[0] == 0:
+        faqs_fixas = [
+            ('Preciso de documento?', 'Sim, documento com foto.'),
+            ('Posso cancelar?', 'Depende da excursão.'),
+            ('Quais são as formas de pagamento?', 'Pix ou link de pagamento.'),
+            ('Como faço uma reserva?', 'Basta escolher a excursão no site.'),
+            ('O ônibus tem ar-condicionado?', 'Sim, todos os ônibus são equipados com ar-condicionado.')
+        ]
+        cursor.executemany("INSERT INTO faqs (pergunta, resposta) VALUES (?, ?)", faqs_fixas)
 
     conn.commit()
     conn.close()
 
-
 inicializar_banco()
-
 
 def obter_dados_cms():
     conn = sqlite3.connect(DB_NAME)
@@ -155,24 +171,20 @@ def obter_dados_cms():
     conn.close()
     return config, deps, faqs
 
-
 # --- ROTAS ADMINISTRATIVAS ---
 @app.route('/')
 def index():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    # Buscamos as viagens cruas do banco de dados
     viagens_cruas = cursor.execute("SELECT * FROM viagens").fetchall()
     usuarios = cursor.execute("SELECT * FROM usuarios").fetchall()
 
-    # 1. Ajuste Dinâmico para a Aba "Gestão de Mensagens" e sua Modal de Compradores
     viagens = []
     for v in viagens_cruas:
         id_viagem = v[0]
         preco_unitario = v[4]
 
-        # Agrupa os compradores desta viagem contando quantos assentos cada CPF/Usuário comprou repetido no carrinho
         compradores_db = cursor.execute('''
             SELECT u.nome, u.cpf, u.data_nascimento, u.telefone, u.email, COUNT(r.id) as assentos
             FROM reservas r
@@ -194,18 +206,9 @@ def index():
                 'email': c[4],
                 'quantidade_assentos': qtd_assentos,
                 'valor_pago': valor_pago,
-                'forma_pagamento': 'Mercado Pago'  # Gateway padrão do sistema
+                'forma_pagamento': 'Mercado Pago'
             })
 
-        # Transformamos a tupla em um dicionário manipulável para o Jinja2 no HTML
-        viagem_dict = {
-            'id': v[0], 'destino': v[1], 'data': v[2], 'vagas_totais': v[3],
-            'preco': v[4], 'imagem': v[5], 'informacoes': v[6], 'regras': v[7],
-            'compras': compradores_lista,  # Usado no filtro {{ v.compras|length }}
-            'compras_json': json.dumps(compradores_lista)  # Capturado pelo JS da modal
-        }
-
-        # Criamos o mapeamento por índice numérico legado para não quebrar a primeira aba do seu HTML
         viagem_compativel = [v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]]
 
         class ObjetoCompativel(list):
@@ -220,7 +223,6 @@ def index():
 
         viagens.append(v_obj)
 
-    # 2. Mantém a lógica clássica da base de clientes intacta
     clientes_lista = []
     for u in usuarios:
         compras = cursor.execute(
@@ -231,19 +233,15 @@ def index():
     total_viagens = len(viagens)
     total_clientes = len(usuarios)
     total_reservas = cursor.execute("SELECT COUNT(*) FROM reservas").fetchone()[0]
-    faturamento_db = \
-        cursor.execute('''SELECT SUM(v.preco) FROM reservas r JOIN viagens v ON r.id_viagem = v.id''').fetchone()[0]
+    faturamento_db = cursor.execute('''SELECT SUM(v.preco) FROM reservas r JOIN viagens v ON r.id_viagem = v.id''').fetchone()[0]
 
     faturamento = faturamento_db if faturamento_db else 0.0
     faturamento_formatado = f"{faturamento:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-    stats = {'viagens': total_viagens, 'clientes': total_clientes, 'reservas': total_reservas,
-             'faturamento': faturamento_formatado}
+    stats = {'viagens': total_viagens, 'clientes': total_clientes, 'reservas': total_reservas, 'faturamento': faturamento_formatado}
     conn.close()
     config, deps, faqs = obter_dados_cms()
-    return render_template('index.html', lista=viagens, clientes=clientes_lista, conf=config, deps=deps, faqs=faqs,
-                           stats=stats)
-
+    return render_template('index.html', lista=viagens, clientes=clientes_lista, conf=config, deps=deps, faqs=faqs, stats=stats)
 
 @app.route('/comprar/<int:id>')
 def comprar(id):
@@ -282,7 +280,6 @@ def comprar(id):
     except Exception as e:
         return f"<h1>Erro no pagamento:</h1><p>{str(e)}</p>"
 
-
 @app.route('/cadastrar', methods=['POST'])
 def cadastrar():
     destino = request.form.get('destino')
@@ -303,7 +300,6 @@ def cadastrar():
     conn.close()
     return redirect('/')
 
-
 @app.route('/excursao/<int:id>')
 def detalhes_excursao(id):
     conn = sqlite3.connect(DB_NAME)
@@ -316,7 +312,6 @@ def detalhes_excursao(id):
 
     config, deps, faqs = obter_dados_cms()
     return render_template('detalhes.html', v=viagem, conf=config)
-
 
 @app.route('/editar/<int:id>')
 def editar_viagem(id):
@@ -333,7 +328,6 @@ def editar_viagem(id):
     except Exception as e:
         return f"<h1 style='color:#367C2B'>Erro na edição:</h1><p>{str(e)}</p>", 200
 
-
 @app.route('/atualizar/<int:id>', methods=['POST'])
 def atualizar_viagem(id):
     destino = request.form.get('destino')
@@ -342,7 +336,6 @@ def atualizar_viagem(id):
     preco = request.form.get('preco')
     informacoes = request.form.get('informacoes')
     regras = request.form.get('regras')
-
     mensagem_whatsapp = request.form.get('mensagem_whatsapp')
 
     imagem_nome = salvar_imagem(request.files.get('imagem'))
@@ -363,7 +356,6 @@ def atualizar_viagem(id):
     conn.close()
     return redirect('/')
 
-
 @app.route('/deletar/<int:id>')
 def deletar_viagem(id):
     conn = sqlite3.connect(DB_NAME)
@@ -373,14 +365,15 @@ def deletar_viagem(id):
     conn.close()
     return redirect('/')
 
-
 # --- ROTAS DO CMS E SITE ---
 @app.route('/salvar_identidade', methods=['POST'])
 def salvar_identidade():
     nome_agencia = request.form.get('nome_agencia')
     b1_link, b2_link = request.form.get('banner1_link'), request.form.get('banner2_link')
-    logo, b1_img, b2_img = salvar_imagem(request.files.get('logo')), salvar_imagem(
-        request.files.get('banner1_img')), salvar_imagem(request.files.get('banner2_img'))
+    logo = salvar_imagem(request.files.get('logo'))
+    b1_img = salvar_imagem(request.files.get('banner1_img'))
+    b2_img = salvar_imagem(request.files.get('banner2_img'))
+    
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('UPDATE configuracoes SET nome_agencia=?, banner1_link=?, banner2_link=? WHERE id=1',
@@ -391,7 +384,6 @@ def salvar_identidade():
     conn.commit()
     conn.close()
     return redirect('/#pane-config-site')
-
 
 @app.route('/site')
 def site_oficial():
@@ -408,7 +400,6 @@ def site_oficial():
     conn.close()
     config, deps, faqs = obter_dados_cms()
     return render_template('site.html', lista=viagens, conf=config, deps=deps, faqs=faqs, favs_user=favoritos_usuario)
-
 
 @app.route('/meus_favoritos')
 def meus_favoritos():
@@ -427,9 +418,7 @@ def meus_favoritos():
 
     conn.close()
     config, _, _ = obter_dados_cms()
-
     return render_template('favoritos.html', lista=viagens_favoritas, conf=config)
-
 
 @app.route('/favoritar/<int:id_viagem>', methods=['POST'])
 def favoritar(id_viagem):
@@ -446,30 +435,20 @@ def favoritar(id_viagem):
     ).fetchone()
 
     if existe:
-        cursor.execute(
-            'DELETE FROM favoritos WHERE id_usuario = ? AND id_viagem = ?',
-            (id_usuario, id_viagem)
-        )
+        cursor.execute('DELETE FROM favoritos WHERE id_usuario = ? AND id_viagem = ?', (id_usuario, id_viagem))
         status = 'removido'
     else:
-        cursor.execute(
-            'INSERT INTO favoritos (id_usuario, id_viagem) VALUES (?, ?)',
-            (id_usuario, id_viagem)
-        )
+        cursor.execute('INSERT INTO favoritos (id_usuario, id_viagem) VALUES (?, ?)', (id_usuario, id_viagem))
         status = 'adicionado'
 
     conn.commit()
     conn.close()
-
     return jsonify({'status': status})
 
-
 # --- ROTAS DE AUTENTICAÇÃO ---
-
 @app.route('/cadastro')
 def tela_cadastro():
     return render_template('cadastro.html')
-
 
 @app.route('/cadastrar_usuario', methods=['POST'])
 def cadastrar_usuario():
@@ -501,7 +480,6 @@ def cadastrar_usuario():
         flash("E-mail já cadastrado.")
         return redirect('/cadastro')
 
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'GET':
@@ -520,13 +498,10 @@ def login():
     flash("E-mail ou senha incorretos, ou cadastro inexistente. Tente novamente!")
     return redirect('/login')
 
-
 # --- SISTEMA DE CARRINHO DE COMPRAS ---
-
 @app.route('/adicionar_carrinho/<int:id_viagem>', methods=['POST'])
 def adicionar_carrinho(id_viagem):
     if 'usuario_id' not in session:
-        # Troquei o jsonify por um redirecionamento com mensagem
         flash("Faça login para adicionar itens ao carrinho.")
         return redirect('/login')
 
@@ -536,8 +511,8 @@ def adicionar_carrinho(id_viagem):
         session['carrinho'] = {}
 
     carrinho = session['carrinho']
-
     id_str = str(id_viagem)
+    
     if id_str in carrinho:
         carrinho[id_str] += quantidade
     else:
@@ -546,7 +521,6 @@ def adicionar_carrinho(id_viagem):
     session['carrinho'] = carrinho
     flash("Item adicionado ao carrinho com sucesso!")
     return redirect('/carrinho')
-
 
 @app.route('/carrinho')
 def ver_carrinho():
@@ -579,7 +553,6 @@ def ver_carrinho():
     config, _, _ = obter_dados_cms()
     return render_template('carrinho.html', itens=itens_carrinho, total=total_geral, conf=config)
 
-
 @app.route('/remover_carrinho/<int:id_viagem>')
 def remover_carrinho(id_viagem):
     if 'carrinho' in session:
@@ -589,7 +562,6 @@ def remover_carrinho(id_viagem):
             del carrinho[id_str]
             session['carrinho'] = carrinho
     return redirect('/carrinho')
-
 
 @app.route('/finalizar_carrinho_mp', methods=['POST'])
 def finalizar_carrinho_mp():
@@ -601,7 +573,6 @@ def finalizar_carrinho_mp():
 
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-
     itens_mercado_pago = []
 
     try:
@@ -624,7 +595,6 @@ def finalizar_carrinho_mp():
 
         conn.commit()
         conn.close()
-
         session.pop('carrinho', None)
 
         preference_data = {
@@ -645,13 +615,12 @@ def finalizar_carrinho_mp():
 
 @app.route('/gerenciar_clientes/<int:id_viagem>')
 def gerenciar_clientes(id_viagem):
-    if 'usuario_id' not in session:  # Opcional: protege a rota para admins/logados
+    if 'usuario_id' not in session:
         return redirect('/login')
 
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    # 1. Busca os detalhes da excursão para colocar no título da página
     viagem = cursor.execute("SELECT destino, data, preco FROM viagens WHERE id = ?", (id_viagem,)).fetchone()
     if not viagem:
         conn.close()
@@ -659,8 +628,6 @@ def gerenciar_clientes(id_viagem):
 
     destino, data_viagem, preco_unitario = viagem[0], viagem[1], viagem[2]
 
-    # 2. Busca todos os dados dos clientes que compraram essa excursão específica
-    # Agrupa por usuário para somar a quantidade de assentos se compraram mais de um no carrinho
     compradores_db = cursor.execute('''
         SELECT u.nome, u.cpf, u.data_nascimento, u.telefone, u.email, COUNT(r.id) as assentos
         FROM reservas r
@@ -682,12 +649,10 @@ def gerenciar_clientes(id_viagem):
             'email': c[4],
             'quantidade_assentos': qtd_assentos,
             'valor_pago': valor_pago,
-            'forma_pagamento': 'Mercado Pago'  # Gateway padrão do seu sistema
+            'forma_pagamento': 'Mercado Pago'
         })
 
     conn.close()
-
-    # Busca dados do CMS apenas para manter o padrão visual/nome da agência se necessário
     config, _, _ = obter_dados_cms()
 
     return render_template('gerenciar_clientes.html',
@@ -706,11 +671,9 @@ def dashboard():
     config, _, _ = obter_dados_cms()
     return render_template('dashboard.html', lista=viagens, conf=config)
 
-
 @app.route('/sucesso')
 def sucesso():
     return f"<div style='text-align:center; margin-top:100px;'><h1>Pagamento Aprovado! 🎉</h1><a href='/dashboard' style='background:#1B264A; color:white; padding:10px; text-decoration:none;'>Voltar</a></div>"
-
 
 @app.route('/logout')
 def logout():
@@ -728,23 +691,14 @@ def confirmacao_compra():
         return redirect('/site')
 
     id_usuario = session['usuario_id']
-
-    # Conecta ao banco de dados para salvar as reservas
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
     try:
-        # Percorre os itens do carrinho e grava cada assento comprado no banco
         for id_viagem_str, qtd in carrinho.items():
             id_viagem = int(id_viagem_str)
-            
-            # Executa o insert de acordo com a quantidade selecionada
             for _ in range(qtd):
-                cursor.execute(
-                    "INSERT INTO reservas (id_usuario, id_viagem) VALUES (?, ?)",
-                    (id_usuario, id_viagem)
-                )
-
+                cursor.execute("INSERT INTO reservas (id_usuario, id_viagem) VALUES (?, ?)", (id_usuario, id_viagem))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -752,12 +706,9 @@ def confirmacao_compra():
     finally:
         conn.close()
 
-    # Limpa o carrinho da sessão somente após gravar tudo no banco com sucesso
     session.pop('carrinho', None)
-
     config, _, _ = obter_dados_cms()
     return render_template('confirmacao.html', conf=config)
-
 
 if __name__ == '__main__':
     app.run(debug=True)
