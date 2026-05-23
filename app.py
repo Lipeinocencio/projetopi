@@ -123,6 +123,22 @@ def inicializar_banco():
         except sqlite3.OperationalError:
             pass  # Se a coluna já existir, ele só ignora e não quebra o código
 
+    # --- CÓDIGO PARA INSERIR EXCURSÕES FIXAS (VITRINE) AUTOMATICAMENTE ---
+    cursor.execute("SELECT COUNT(*) FROM viagens")
+    if cursor.fetchone()[0] == 0:  # Só adiciona se a tabela for apagada pelo Render
+        viagens_teste = [
+            ('Zeca & Alcione & Aragão - O maior encontro do samba em São Paulo', '2026-08-15', 45, 250.00, '', 'Transporte executivo com ar-condicionado. Chegada cedo para aproveitar o evento.', 'Proibido consumo de bebidas alcoólicas no interior do ônibus.', 'Olá, quero reservar minha vaga para o Maior Encontro do Samba!'),
+            ('Ed Sheeran em São Paulo', '2026-09-10', 50, 300.00, '', 'Excursão saindo na parte da manhã. Parada para almoço no caminho.', 'Tolerância de 15 minutos de atraso no embarque.', 'Olá, quero ir no show do Ed Sheeran!'),
+            ('Barão Vermelho - Hospitalidade em São Paulo', '2026-10-05', 40, 180.00, '', 'Viagem bate e volta. Ônibus animado, desembarque próximo ao local.', 'Menores de idade apenas com autorização autenticada.', 'Olá, quero ir no show do Barão Vermelho!'),
+            ('Os Garotin no Circo Voador no Rio de Janeiro', '2026-11-20', 46, 280.00, '', 'Final de semana no Rio com parada na Lapa antes do show.', 'Apresentação de documento original com foto é obrigatória.', 'Olá, quero ir no Circo Voador ver Os Garotin!')
+        ]
+        
+        cursor.executemany(
+            "INSERT INTO viagens (destino, data, vagas_totais, preco, imagem, informacoes, regras, mensagem_whatsapp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            viagens_teste
+        )
+    # ------------------------------------------------------------
+
     conn.commit()
     conn.close()
 
